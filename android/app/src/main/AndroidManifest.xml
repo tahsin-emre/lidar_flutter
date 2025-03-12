@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Camera permission for AR -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- Internet permission for model sharing -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Storage permissions -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    
+    <!-- AR feature requirements -->
+    <uses-feature android:name="android.hardware.camera.ar" android:required="true" />
+    <uses-feature android:name="android.hardware.camera" android:required="true" />
+    
+    <application
+        // ... existing code ...
+</manifest> 
