@@ -47,7 +47,7 @@ class HomeScreen extends StatelessWidget {
             const Icon(
               Icons.view_in_ar,
               size: 80,
-              color: Colors.blue,
+              color: Colors.greenAccent,
             ),
             const SizedBox(height: 24),
             const Text(
