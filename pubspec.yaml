@@ -32,12 +32,26 @@ dependencies:
     sdk: flutter
 
   # Core
-  provider: ^6.0.5
   path_provider: ^2.1.1
   path: ^1.8.3
   
+  # State Management
+  flutter_bloc: ^9.1.0
+  equatable: ^2.0.7
+  
+  # Dependency Injection
+  get_it: ^8.0.3
+  injectable: ^2.3.2
+  
+  # Navigation
+  go_router: ^14.8.1
+  
   # UI
   cupertino_icons: ^1.0.6
+  flutter_svg: ^2.0.9
+  lottie: ^3.0.0
+  skeletonizer: ^0.8.0
+  flutter_spinkit: ^5.2.0
 
   # AR and 3D
   arkit_plugin: ^1.0.7
@@ -52,19 +66,19 @@ dependencies:
   # Platform channel communication
   flutter_isolate: ^2.0.4    # Handle heavy tasks in background
   
-  # UI components
-  flutter_svg: ^2.0.9        # SVG support for UI elements
-  lottie: ^3.0.0             # Animation for scanning instructions
+  # JSON serialization
+  json_annotation: ^4.9.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
-  # The "flutter_lints" package below contains a set of recommended lints to
-  # encourage good coding practices. The lint set provided by the package is
-  # activated in the `analysis_options.yaml` file located at the root of your
-  # package. See that file for information about deactivating specific lint
-  # rules and activating additional ones.
+  # Code generation
+  build_runner: ^2.4.15
+  json_serializable: ^6.9.4
+  injectable_generator: ^2.7.0
+
+  # Linting
   flutter_lints: ^2.0.0
 
 # For information on the generic Dart part of this file, see the

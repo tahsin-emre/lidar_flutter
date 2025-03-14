@@ -1,100 +1,98 @@
-# 3D Scanner with LiDAR/Depth Sensors
+# LiDAR 3D Scanner Flutter App
 
-A Flutter application that uses ARKit (iOS) and ARCore (Android) to scan real-world objects and generate 3D models. The app utilizes LiDAR on iOS devices and depth APIs on Android to collect point cloud data and implements surface reconstruction techniques to create mesh models.
+A Flutter application for 3D scanning using LiDAR and depth sensors on compatible devices.
 
 ## Features
 
-- **3D Object Scanning**: Uses AR frameworks to scan real-world objects
-- **Real-time Guidance**: Overlay UI instructions and visual cues to guide the scanning process
-- **3D Model Generation**: Converts point cloud data into 3D models (USDZ, OBJ, GLTF)
-- **3D Model Viewer**: Interactive viewer with gesture controls for the generated models
-- **Cross-Platform**: Works on both iOS (ARKit) and Android (ARCore)
+- 3D scanning using LiDAR sensors (iOS) or depth sensors (Android)
+- Real-time scanning progress visualization
+- 3D model viewing with interactive controls
+- AR mode for viewing models in real-world context
+- Export models to different formats
+- Share models with others
 
-## Requirements
+## Technical Architecture
 
-### iOS
-- iOS 14.0 or later (for LiDAR functionality)
-- Device with LiDAR sensor (iPhone 12 Pro, iPad Pro 2020 or later)
-- Xcode 12 or later
+This project follows a feature-based architecture with clean separation of concerns:
 
-### Android
-- Android 8.0 (API Level 26) or later
-- ARCore-supported device with depth API support
-- Android Studio 4.0 or later
+### Project Structure
 
-## Setup Instructions
+```
+lib/
+├── feature/           # Feature modules
+│   ├── home/          # Home screen feature
+│   ├── scanner/       # Scanner feature
+│   └── model_viewer/  # Model viewer feature
+└── product/           # Shared product code
+    ├── init/          # App initialization
+    │   ├── di/        # Dependency injection
+    │   └── router/    # App routing
+    ├── models/        # Data models
+    ├── services/      # Services
+    └── utils/         # Utilities
+```
+
+### Architecture Components
+
+- **State Management**: Flutter BLoC for reactive and testable state management
+- **Dependency Injection**: GetIt for service locator pattern
+- **Navigation**: GoRouter for declarative routing
+- **Services**: Platform-specific services for AR/LiDAR functionality
+- **Models**: JSON-serializable data models
+
+## Getting Started
 
 ### Prerequisites
-1. Install Flutter SDK (version 3.7.0 or later)
-2. Set up iOS and Android development environments
-3. Install required dependencies
+
+- Flutter SDK (3.0.0 or higher)
+- iOS 14.0+ device with LiDAR sensor (iPhone 12 Pro/Pro Max, iPhone 13 Pro/Pro Max, iPad Pro 2020 or newer)
+- Android device with ARCore support and depth API compatibility
 
 ### Installation
+
 1. Clone the repository:
-   ```
-   git clone https://github.com/yourusername/lidar_flutter.git
-   cd lidar_flutter
-   ```
+```bash
+git clone https://github.com/yourusername/lidar_flutter.git
+cd lidar_flutter
+```
 
 2. Install dependencies:
-   ```
-   flutter pub get
-   ```
+```bash
+flutter pub get
+```
 
-3. Run the app:
-   ```
-   flutter run
-   ```
+3. Generate code:
+```bash
+flutter pub run build_runner build --delete-conflicting-outputs
+```
 
-## Technical Implementation
+4. Run the app:
+```bash
+flutter run
+```
 
-### iOS (ARKit/LiDAR)
-- Uses `ARKit` framework with scene reconstruction capabilities
-- Utilizes LiDAR sensor for accurate depth mapping
-- Implements RealityKit for processing and mesh generation
+## Development
 
-### Android (ARCore)
-- Uses `ARCore` with depth API for point cloud collection
-- Implements Sceneform for 3D model processing
-- Utilizes depth sensors where available
+### Code Generation
 
-### Flutter Integration
-- Platform Channels for native AR functionality
-- Model viewer integration for displaying generated 3D models
-- State management with Provider
+This project uses code generation for JSON serialization and dependency injection. After making changes to models or services, run:
 
-## Usage Guide
+```bash
+flutter pub run build_runner build --delete-conflicting-outputs
+```
 
-1. **Home Screen**: Choose between starting a new scan or viewing existing models
-2. **Scanning Process**:
-   - Place your object on a flat surface
-   - Maintain a consistent distance (1-2 feet) from the object
-   - Move slowly around the object for complete coverage
-   - Follow on-screen guidance to capture all areas
-3. **Model Processing**: The app will process the point cloud data into a 3D model
-4. **Model Viewing**: Interact with the generated model using pinch, rotate, and pan gestures
+### Adding New Features
 
-## Limitations
-
-- Scanning works best with objects 10-50cm in size
-- Reflective, transparent, or very dark objects may not scan properly
-- Good lighting conditions are necessary for optimal results
-- Processing complex models may take longer on older devices
-
-## Future Improvements
-
-- Texture mapping for more realistic models
-- Cloud-based processing for higher-quality meshes
-- Model editing capabilities
-- AR placement of scanned models in the real world
-- Multi-language support
+1. Create a new feature directory under `lib/feature/`
+2. Implement the feature using the BLoC pattern
+3. Register any services in the dependency injection container
+4. Add routes in the router configuration
 
 ## License
 
-[MIT License](LICENSE)
+This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Acknowledgements
+## Acknowledgments
 
-- Flutter Team
-- ARKit and ARCore frameworks
-- Contributors and testers
+- ARKit plugin for iOS LiDAR support
+- Model Viewer Plus for 3D model rendering
