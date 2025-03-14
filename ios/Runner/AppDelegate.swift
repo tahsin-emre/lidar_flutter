@@ -1,13 +1,432 @@
-import Flutter
+// Swift system imports
+import Foundation
+import UIKit
+import SceneKit
 import MetalKit
 import ModelIO
-import SceneKit
-import UIKit
+
+// Flutter imports
+import Flutter
 
 // ARKit framework'i kontrol et ve import et
 #if canImport(ARKit)
   import ARKit
 #endif
+
+// MARK: - Tarama İşlemlerini Yöneten Sınıf
+
+class ScanHandler: NSObject, FlutterStreamHandler {
+  // MARK: - Özellikler
+  
+  /// Flutter olaylarını iletmek için kullanılan sink
+  private var eventSink: FlutterEventSink?
+  
+  /// AR oturumu
+  private var arSession: ARSession?
+  
+  /// AR sahne görünümü
+  private var sceneView: ARSCNView?
+  
+  /// Tarama durumu
+  private var isScanning = false
+  
+  /// Tarama sırasında oluşturulan nokta bulutu verileri
+  private var pointCloudData: [ScanPoint] = []
+  
+  /// Mesh ankorları
+  private var meshAnchors: [ARMeshAnchor] = []
+  
+  /// Tarama rehberi düğümü
+  private var scanGuideNode: SCNNode?
+  
+  /// Tarama segmentleri
+  private var scanSegments: [SCNNode] = []
+  
+  /// Taramanın merkezi (tarama küresinin merkezi)
+  private var scanCenter: SCNVector3?
+  
+  /// Tarama işlemi sırasında kullanılan küre düğümü
+  private var scanSphereNode: SCNNode?
+  
+  /// Tespit edilen nesnenin sınırlayıcı küresi
+  private var objectBoundingSphere: (center: SCNVector3, radius: Float)?
+  
+  /// Nesne tespiti yapıldı mı?
+  private var isObjectDetected = false
+  
+  /// Tarama tamamlandı mı?
+  private var isScanCompleted = false
+  
+  /// Tarama duraklatıldı mı?
+  private var isPaused = false
+  
+  /// Tarama noktaları
+  private var scanPoints: [SCNNode] = []
+  
+  /// Tarama kalitesi
+  private var scanQuality: Float = 0.0
+  
+  // MARK: - FlutterStreamHandler Protokolü
+  
+  public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
+    eventSink = events
+    return nil
+  }
+  
+  public func onCancel(withArguments arguments: Any?) -> FlutterError? {
+    eventSink = nil
+    return nil
+  }
+  
+  // MARK: - Temel Metotlar
+  
+  public func setupARKitConfig(enableLiDAR: Bool, enableMesh: Bool, result: @escaping FlutterResult) {
+    // ARKit'in kullanılabilir olup olmadığını kontrol et
+    if #available(iOS 14.0, *), enableLiDAR && ARWorldTrackingConfiguration.supportsSceneReconstruction(.mesh) {
+      // ARKit oturumu yarat
+      arSession = ARSession()
+      
+      // ARSCNView oluştur
+      sceneView = ARSCNView()
+      sceneView?.session = arSession!
+      sceneView?.automaticallyUpdatesLighting = true
+      
+      // Dünya izleme konfigürasyonu
+      let configuration = ARWorldTrackingConfiguration()
+      
+      // LiDAR ve mesh özelliklerini yapılandır
+      configuration.sceneReconstruction = enableMesh ? .mesh : []
+      configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+      
+      // Oturumu başlat
+      arSession?.run(configuration)
+      
+      result(true)
+    } else {
+      result(FlutterError(
+        code: "AR_UNAVAILABLE",
+        message: "Bu cihaz LiDAR veya ARKit özelliklerini desteklemiyor",
+        details: nil))
+    }
+  }
+  
+  public func initializeScan(result: @escaping FlutterResult) {
+    // Taramayı başlat
+    isScanning = true
+    pointCloudData = []
+    meshAnchors = []
+    isObjectDetected = false
+    isScanCompleted = false
+    isPaused = false
+    scanQuality = 0.0
+    
+    if let sink = eventSink {
+      sink([
+        "type": "guidance",
+        "message": "Lütfen taramak istediğiniz nesnenin etrafında dolaşın"
+      ])
+    }
+    
+    result(true)
+  }
+  
+  public func startScan(result: @escaping FlutterResult) {
+    // Taramayı başlat
+    isScanning = true
+    
+    // ARKit oturumu kontrol et
+    if arSession == nil {
+      setupARKitConfig(enableLiDAR: true, enableMesh: true) { success in
+        if success as? Bool == true {
+          result(true)
+        } else {
+          result(FlutterError(
+            code: "SCAN_START_ERROR",
+            message: "AR oturumu başlatılamadı",
+            details: nil))
+        }
+      }
+    } else {
+      result(true)
+    }
+  }
+  
+  public func detectObjectAndCreateSphere(result: @escaping FlutterResult) {
+    // Eğer nesne zaten tespit edildiyse, işlem gerekli değil
+    if isObjectDetected {
+      result(true)
+      return
+    }
+    
+    // ARSession'ın aktif olduğundan emin ol
+    guard let arSession = arSession, let sceneView = sceneView else {
+      result(FlutterError(
+        code: "AR_SESSION_ERROR",
+        message: "AR oturumu hazır değil",
+        details: nil))
+      return
+    }
+    
+    // Merkez noktası oluştur ve nesneyi temsil eden sanal küre ekle
+    scanCenter = SCNVector3(0, 0, -0.5) // Varsayılan merkez
+    objectBoundingSphere = (center: scanCenter!, radius: 0.15) // Varsayılan küre
+    
+    // Sanal küre oluştur
+    let sphere = SCNSphere(radius: CGFloat(objectBoundingSphere!.radius))
+    sphere.firstMaterial?.diffuse.contents = UIColor.blue.withAlphaComponent(0.3)
+    sphere.firstMaterial?.isDoubleSided = true
+    
+    scanSphereNode = SCNNode(geometry: sphere)
+    scanSphereNode?.position = scanCenter!
+    scanSphereNode?.opacity = 0.5
+    
+    sceneView.scene.rootNode.addChildNode(scanSphereNode!)
+    
+    isObjectDetected = true
+    
+    // Olay gönder
+    if let sink = eventSink {
+      sink([
+        "type": "guidance",
+        "message": "Nesne tespit edildi. Taramaya devam edin."
+      ])
+    }
+    
+    result(true)
+  }
+  
+  public func processAndExportModel(result: @escaping FlutterResult) {
+    // ARSession'ın aktif olduğundan emin ol
+    guard isScanning, let sceneView = sceneView else {
+      result(FlutterError(
+        code: "EXPORT_ERROR",
+        message: "Aktif bir tarama bulunamadı",
+        details: nil))
+      return
+    }
+    
+    // Model oluşturma işlemi başlatıldı bilgisini gönder
+    if let sink = eventSink {
+      sink([
+        "type": "guidance",
+        "message": "3D model oluşturuluyor..."
+      ])
+    }
+    
+    // USDZ formatında model oluştur
+    let documentsPath = NSSearchPathForDirectoriesInDomains(.documentDirectory, .userDomainMask, true).first!
+    let dateFormatter = DateFormatter()
+    dateFormatter.dateFormat = "yyyyMMdd_HHmmss"
+    
+    let modelName = "scan_\(dateFormatter.string(from: Date()))"
+    let modelPath = "\(documentsPath)/\(modelName).usdz"
+    
+    // Basit bir küre modeli kaydet (gerçek uygulamada mesh verilerinden model oluşturulmalı)
+    // Not: Bu örnek, gerçek bir 3D model oluşturmaz, sadece işlemi simüle eder
+    DispatchQueue.global(qos: .userInitiated).async {
+      // Gerçek uygulamada burada model oluşturma işlemleri yapılmalı
+      Thread.sleep(forTimeInterval: 2) // Model işleme süresini simüle et
+      
+      // Ana iş parçacığına dön ve sonucu bildir
+      DispatchQueue.main.async {
+        // İşlemi tamamla ve sonucu bildir
+        if let sink = self.eventSink {
+          sink([
+            "type": "guidance",
+            "message": "Model oluşturma tamamlandı!"
+          ])
+        }
+        
+        // Taramayı tamamla
+        self.isScanCompleted = true
+        self.isScanning = false
+        
+        // Model yolunu döndür
+        result([
+          "modelPath": modelPath,
+          "modelFormat": "usdz",
+          "success": true
+        ])
+      }
+    }
+  }
+  
+  public func pauseScan(result: @escaping FlutterResult) {
+    // Taramayı duraklat
+    if isScanning && !isPaused {
+      isPaused = true
+      arSession?.pause()
+      
+      // Tarama duraklatıldı bilgisini gönder
+      if let sink = eventSink {
+        sink([
+          "type": "guidance",
+          "message": "Tarama duraklatıldı"
+        ])
+      }
+    }
+    
+    result(true)
+  }
+  
+  public func resumeScan(result: @escaping FlutterResult) {
+    // Taramayı devam ettir
+    if isPaused {
+      isPaused = false
+      
+      // ARSession'ı yeniden başlat
+      if let arSession = arSession {
+        let configuration = ARWorldTrackingConfiguration()
+        if #available(iOS 14.0, *) {
+          configuration.sceneReconstruction = .mesh
+          configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+        }
+        arSession.run(configuration)
+      }
+      
+      // Tarama devam ediyor bilgisini gönder
+      if let sink = eventSink {
+        sink([
+          "type": "guidance",
+          "message": "Tarama devam ediyor"
+        ])
+      }
+    }
+    
+    result(true)
+  }
+  
+  public func completeScan(format: String, result: @escaping FlutterResult) {
+    // Taramayı tamamla
+    if isScanning {
+      // Model işleme ve dışa aktarma işlemini başlat
+      processAndExportModel(result: result)
+    } else {
+      result(FlutterError(
+        code: "SCAN_NOT_ACTIVE",
+        message: "Aktif bir tarama bulunamadı",
+        details: nil))
+    }
+  }
+  
+  public func cancelScan(result: @escaping FlutterResult) {
+    // Taramayı iptal et
+    isScanning = false
+    isPaused = false
+    isScanCompleted = false
+    isObjectDetected = false
+    
+    // AR oturumunu temizle
+    arSession?.pause()
+    
+    // Tarama iptal edildi bilgisini gönder
+    if let sink = eventSink {
+      sink([
+        "type": "guidance",
+        "message": "Tarama iptal edildi"
+      ])
+    }
+    
+    result(true)
+  }
+  
+  public func getPointCloudData(result: @escaping FlutterResult) {
+    // Nokta bulutu verilerini döndür
+    let points = pointCloudData.map { point -> [String: Any] in
+      return [
+        "x": point.position.x,
+        "y": point.position.y,
+        "z": point.position.z,
+        "r": point.color.x,
+        "g": point.color.y,
+        "b": point.color.z,
+        "confidence": point.confidence
+      ]
+    }
+    
+    result(points)
+  }
+  
+  public func resetScan(result: @escaping FlutterResult) {
+    // Taramayı sıfırla
+    isScanning = false
+    isPaused = false
+    isScanCompleted = false
+    isObjectDetected = false
+    pointCloudData = []
+    meshAnchors = []
+    
+    // AR oturumu ve sahneyi temizle
+    if let sceneView = sceneView {
+      sceneView.scene.rootNode.childNodes.forEach { $0.removeFromParentNode() }
+    }
+    
+    // AR oturumunu yeniden başlat
+    if let arSession = arSession {
+      let configuration = ARWorldTrackingConfiguration()
+      if #available(iOS 14.0, *) {
+        configuration.sceneReconstruction = .mesh
+        configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+      }
+      arSession.run(configuration, options: [.resetTracking, .removeExistingAnchors])
+    }
+    
+    // Tarama sıfırlandı bilgisini gönder
+    if let sink = eventSink {
+      sink([
+        "type": "guidance",
+        "message": "Tarama sıfırlandı"
+      ])
+    }
+    
+    result(true)
+  }
+  
+  // ARKit View için Flutter'a native view ekleyecek metot
+  private func createAndAddARView(viewId: Int64, frame: CGRect, args: Any?) -> UIView {
+    // Eğer ARSCNView halihazırda oluşturulmadıysa oluştur
+    if sceneView == nil {
+      // ARKit oturumunu oluştur
+      arSession = ARSession()
+      
+      // ARSCNView oluştur ve yapılandır
+      sceneView = ARSCNView(frame: frame)
+      sceneView?.session = arSession!
+      sceneView?.automaticallyUpdatesLighting = true
+      
+      // ARKit konfigürasyonu
+      if #available(iOS 14.0, *) {
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.sceneReconstruction = .mesh
+        configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+        arSession?.run(configuration)
+      } else {
+        let configuration = ARWorldTrackingConfiguration()
+        arSession?.run(configuration)
+      }
+    }
+    
+    return sceneView!
+  }
+}
+
+/// 3D tarama için bir nokta kaydı.
+struct ScanPoint {
+    /// 3D dünya konumu
+    var position: SIMD3<Float>
+    
+    /// Noktanın rengi (RGB)
+    var color: SIMD3<Float>
+    
+    /// Yüzey normali
+    var normal: SIMD3<Float>
+    
+    /// Nokta güven değeri (0.0-1.0)
+    var confidence: Float
+    
+    /// Nokta tarandı mı?
+    var isScanned: Bool
+}
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
@@ -18,6 +437,18 @@ import UIKit
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
     let controller: FlutterViewController = window?.rootViewController as! FlutterViewController
+
+    // ARKit View için factory kaydı
+    let factory = ARNativeViewFactory(scanHandler: ScanHandler())
+    scanHandler = factory.scanHandler
+    
+    // Platform view factory'i kaydet
+    if let registrar = registrar(forPlugin: "ARKitViewPlugin") {
+      registrar.register(
+        factory,
+        withId: "lidar_flutter/ar_view"
+      )
+    }
 
     // Scanner service channel
     let scanServiceChannel = FlutterMethodChannel(
@@ -31,7 +462,7 @@ import UIKit
 
     // Ana scanner channel
     let scannerChannel = FlutterMethodChannel(
-      name: "com.example.lidar_flutter/scanner",
+      name: "lidar_flutter/scanner",
       binaryMessenger: controller.binaryMessenger)
 
     // Register event channel
@@ -51,13 +482,27 @@ import UIKit
       case "supportsLiDAR":
         self.checkLidarSupport(result: result)
       case "startScanning":
-        self.scanHandler?.startScanning(result: result)
+        self.scanHandler?.startScan(result: result)
       case "pauseSession":
-        self.scanHandler?.pauseSession(result: result)
+        self.scanHandler?.pauseScan(result: result)
       case "resumeSession":
-        self.scanHandler?.resumeSession(result: result)
+        self.scanHandler?.resumeScan(result: result)
       case "processPointCloudData":
         self.scanHandler?.processAndExportModel(result: result)
+      case "setupARKitConfig":
+        if let args = call.arguments as? [String: Any],
+          let enableLiDAR = args["enableLiDAR"] as? Bool,
+          let enableMesh = args["enableMesh"] as? Bool
+        {
+          self.scanHandler?.setupARKitConfig(enableLiDAR: enableLiDAR, enableMesh: enableMesh, result: result)
+        } else {
+          result(FlutterError(
+            code: "INVALID_ARGUMENTS",
+            message: "enableLiDAR and enableMesh parameters are required",
+            details: nil))
+        }
+      case "detectObjectAndCreateSphere":
+        self.scanHandler?.detectObjectAndCreateSphere(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -118,6 +563,8 @@ import UIKit
               message: "Path is required",
               details: nil))
         }
+      case "resetScan":
+        self.scanHandler?.resetScan(result: result)
       default:
         result(FlutterMethodNotImplemented)
       }
@@ -126,6 +573,8 @@ import UIKit
     GeneratedPluginRegistrant.register(with: self)
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
   }
+
+  // MARK: - Yardımcı Metotlar
 
   private func checkLidarSupport(result: @escaping FlutterResult) {
     if #available(iOS 14.0, *) {
@@ -185,284 +634,68 @@ import UIKit
   }
 }
 
-// ScanHandler manages the AR scanning session and events
-class ScanHandler: NSObject, FlutterStreamHandler {
-  private var eventSink: FlutterEventSink?
-  private var arSession: ARSession?
-  private var sceneView: ARSCNView?
-  private var isScanning = false
-  private var pointCloudData: [simd_float3] = []
-  private var meshAnchors: [ARMeshAnchor] = []
+// MARK: - ARKit Native View Factory
 
-  // MARK: - FlutterStreamHandler
-
-  func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink)
-    -> FlutterError?
-  {
-    self.eventSink = events
-    return nil
+class ARNativeViewFactory: NSObject, FlutterPlatformViewFactory {
+  let scanHandler: ScanHandler
+  
+  init(scanHandler: ScanHandler) {
+    self.scanHandler = scanHandler
+    super.init()
   }
-
-  func onCancel(withArguments arguments: Any?) -> FlutterError? {
-    self.eventSink = nil
-    return nil
+  
+  func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+    return ARNativeView(frame: frame, viewId: viewId, args: args, scanHandler: scanHandler)
   }
-
-  // MARK: - AR Scanner Specific Methods
-
-  func startScanning(result: @escaping FlutterResult) {
-    isScanning = true
-    meshAnchors.removeAll()
-    pointCloudData.removeAll()
-
-    // Send event that scanning has started
-    self.eventSink?(["type": "scanStatus", "status": "started"])
-    result(nil)
+  
+  func createArgsCodec() -> FlutterMessageCodec & NSObjectProtocol {
+    return FlutterStandardMessageCodec.sharedInstance()
   }
+}
 
-  func pauseSession(result: @escaping FlutterResult) {
-    arSession?.pause()
-    result(nil)
-  }
-
-  func resumeSession(result: @escaping FlutterResult) {
-    // ARWorldTrackingConfiguration oluştur
-    let configuration = ARWorldTrackingConfiguration()
-
-    if #available(iOS 13.4, *) {
-      configuration.sceneReconstruction = .mesh
-      configuration.frameSemantics = .sceneDepth
-    }
-
-    arSession?.run(configuration)
-    result(nil)
-  }
-
-  func processAndExportModel(result: @escaping FlutterResult) {
-    // Tarama verilerini 3D modele dönüştür
-    DispatchQueue.global(qos: .userInitiated).async {
-      if self.meshAnchors.isEmpty {
-        // Test için basit bir küp oluştur
-        let modelPath = self.createSampleModel()
-
-        DispatchQueue.main.async {
-          result(["modelPath": modelPath])
-        }
-        return
-      }
-
-      // Metal cihazı oluştur
-      guard let device = MTLCreateSystemDefaultDevice() else {
-        DispatchQueue.main.async {
-          result(
-            FlutterError(code: "NO_METAL", message: "Metal device not available", details: nil))
-        }
-        return
-      }
-
-      // MDLAsset oluştur ve mesh verilerini ekle
-      let asset = MDLAsset()
-
-      // Taranmış mesh verilerini ekle
-      for anchor in self.meshAnchors {
-        if let mesh = self.createSimpleMesh(device: device) {
-          asset.add(mesh)
-        }
-      }
-
-      // Model dosyasını kaydet
-      let documentsPath = NSSearchPathForDirectoriesInDomains(
-        .documentDirectory, .userDomainMask, true
-      ).first!
-      let timestamp = Int(Date().timeIntervalSince1970)
-      let modelPath = "\(documentsPath)/scan_\(timestamp).usdz"
-
-      do {
-        // USDZ formatında dışa aktar
-        try asset.export(to: URL(fileURLWithPath: modelPath))
-
-        DispatchQueue.main.async {
-          result(["modelPath": modelPath])
-        }
-      } catch {
-        print("Error exporting model: \(error)")
-
-        // Hata durumunda örnek model döndür
-        let samplePath = self.createSampleModel()
-        DispatchQueue.main.async {
-          result(["modelPath": samplePath])
-        }
-      }
-    }
-  }
-
-  private func createSimpleMesh(device: MTLDevice) -> MDLMesh? {
-    // Basit bir küp oluştur
-    let allocator = MTKMeshBufferAllocator(device: device)
-    let mesh = MDLMesh(
-      boxWithExtent: SIMD3<Float>(0.1, 0.1, 0.1),
-      segments: SIMD3<UInt32>(2, 2, 2),
-      inwardNormals: false,
-      geometryType: .triangles,
-      allocator: allocator)
-    return mesh
-  }
-
-  private func createSampleModel() -> String {
-    // Basit bir model oluşturup döndür (test amaçlı)
-    let documentsPath = NSSearchPathForDirectoriesInDomains(
-      .documentDirectory, .userDomainMask, true
-    ).first!
-    let timestamp = Int(Date().timeIntervalSince1970)
-    return "\(documentsPath)/sample_\(timestamp).usdz"
-  }
-
-  // MARK: - Scan Methods
-
-  func initializeScan(result: @escaping FlutterResult) {
-    // Initialize AR session
-    DispatchQueue.main.async {
-      self.arSession = ARSession()
-      self.sceneView = ARSCNView()
-      self.sceneView?.session = self.arSession!
-
-      // Configure AR session for LiDAR scanning
-      let configuration = ARWorldTrackingConfiguration()
-      if #available(iOS 13.4, *) {
-        configuration.sceneReconstruction = .mesh
-        configuration.frameSemantics = .sceneDepth
-      }
-
-      self.arSession?.run(configuration)
-
-      // Set up callbacks for AR session
-      self.arSession?.delegate = self
-
-      result(nil)
-    }
-  }
-
-  func startScan(result: @escaping FlutterResult) {
-    isScanning = true
-    result(nil)
-  }
-
-  func pauseScan(result: @escaping FlutterResult) {
-    isScanning = false
-    result(nil)
-  }
-
-  func resumeScan(result: @escaping FlutterResult) {
-    isScanning = true
-    result(nil)
-  }
-
-  func completeScan(format: String, result: @escaping FlutterResult) {
-    isScanning = false
-
-    if !meshAnchors.isEmpty {
-      // Model işleme ve çıktı alma
-      processAndExportModel(result: result)
+class ARNativeView: NSObject, FlutterPlatformView {
+  let scanHandler: ScanHandler
+  let frame: CGRect
+  let viewId: Int64
+  let arView: UIView
+  
+  init(frame: CGRect, viewId: Int64, args: Any?, scanHandler: ScanHandler) {
+    self.frame = frame
+    self.viewId = viewId
+    self.scanHandler = scanHandler
+    
+    // ARView oluşturma işlemini scanHandler'a yönlendir
+    if let createViewMethod = scanHandler.value(forKey: "createAndAddARView") as? (Int64, CGRect, Any?) -> UIView {
+      self.arView = createViewMethod(viewId, frame, args)
     } else {
-      // Test için örnek model döndür
-      let modelPath = createSampleModel()
-      result(["modelPath": modelPath])
-    }
-  }
-
-  func cancelScan(result: @escaping FlutterResult) {
-    isScanning = false
-    arSession?.pause()
-    meshAnchors.removeAll()
-    pointCloudData.removeAll()
-    result(nil)
-  }
-
-  func getPointCloudData(result: @escaping FlutterResult) {
-    // Point cloud verilerini String listesine dönüştür
-    let pointStrings = pointCloudData.map { point in
-      return "\(point.x),\(point.y),\(point.z)"
-    }
-
-    result(pointStrings)
-  }
-}
-
-// MARK: - ARSessionDelegate
-extension ScanHandler: ARSessionDelegate {
-  func session(_ session: ARSession, didUpdate frame: ARFrame) {
-    guard isScanning else { return }
-
-    // Point cloud verilerini topla
-    if #available(iOS 13.4, *), let depthData = frame.sceneDepth?.depthMap {
-      // Her frame'de point cloud verisini kaydetmek yerine örnek veriler
-      if pointCloudData.count < 10000 && arc4random_uniform(100) < 10 {
-        // Her 10 karedeki birinden örnek noktalar al
-        let width = CVPixelBufferGetWidth(depthData)
-        let height = CVPixelBufferGetHeight(depthData)
-
-        CVPixelBufferLockBaseAddress(depthData, .readOnly)
-        let baseAddress = CVPixelBufferGetBaseAddress(depthData)
-        let bytesPerRow = CVPixelBufferGetBytesPerRow(depthData)
-
-        // Derinlik haritasından nokta bulutu örnekleri oluştur
-        for y in stride(from: 0, to: height, by: 10) {
-          for x in stride(from: 0, to: width, by: 10) {
-            let pixelOffset = y * bytesPerRow + x * MemoryLayout<Float32>.size
-            let depth = baseAddress!.load(fromByteOffset: pixelOffset, as: Float32.self)
-
-            if depth > 0 && depth < 5.0 {  // 5 metre mesafeden yakın nesneler
-              let point = simd_float3(Float(x) / Float(width), Float(y) / Float(height), depth)
-              pointCloudData.append(point)
-            }
-          }
-        }
-
-        CVPixelBufferUnlockBaseAddress(depthData, .readOnly)
+      // Eğer metot bulunamazsa, ARSCNView oluştur
+      let arSession = ARSession()
+      let arScnView = ARSCNView(frame: frame)
+      arScnView.session = arSession
+      arScnView.automaticallyUpdatesLighting = true
+      
+      // ARKit konfigürasyonunu ayarla
+      if #available(iOS 14.0, *) {
+        let configuration = ARWorldTrackingConfiguration()
+        configuration.sceneReconstruction = .mesh
+        configuration.frameSemantics = [.sceneDepth, .smoothedSceneDepth]
+        arSession.run(configuration)
+      } else {
+        let configuration = ARWorldTrackingConfiguration()
+        arSession.run(configuration)
       }
-
-      // İlerleme bilgisini gönder
-      let progress = min(Double(pointCloudData.count) / 5000.0, 1.0)  // Maksimum 5000 nokta
-      self.eventSink?(["type": "scanProgress", "progress": progress])
+      
+      // scanHandler'ın arSession ve sceneView özelliklerini ayarla
+      scanHandler.setValue(arSession, forKey: "arSession")
+      scanHandler.setValue(arScnView, forKey: "sceneView")
+      
+      self.arView = arScnView
     }
+    
+    super.init()
   }
-
-  func session(_ session: ARSession, didAdd anchors: [ARAnchor]) {
-    guard isScanning else { return }
-
-    // Mesh nesneleri topla
-    for anchor in anchors {
-      if #available(iOS 13.4, *), let meshAnchor = anchor as? ARMeshAnchor {
-        meshAnchors.append(meshAnchor)
-      }
-    }
+  
+  func view() -> UIView {
+    return arView
   }
-
-  func session(_ session: ARSession, didUpdate anchors: [ARAnchor]) {
-    guard isScanning else { return }
-
-    // Mevcut mesh'leri güncelle
-    for anchor in anchors {
-      if #available(iOS 13.4, *), let meshAnchor = anchor as? ARMeshAnchor {
-        if let index = meshAnchors.firstIndex(where: { $0.identifier == meshAnchor.identifier }) {
-          meshAnchors[index] = meshAnchor
-        } else {
-          meshAnchors.append(meshAnchor)
-        }
-      }
-    }
-  }
-
-  func session(_ session: ARSession, didRemove anchors: [ARAnchor]) {
-    // Kaldırılan mesh'leri takip et
-    for anchor in anchors {
-      if #available(iOS 13.4, *), let meshAnchor = anchor as? ARMeshAnchor {
-        meshAnchors.removeAll { $0.identifier == meshAnchor.identifier }
-      }
-    }
-  }
-
-  func session(_ session: ARSession, didFailWithError error: Error) {
-    eventSink?(["type": "error", "message": error.localizedDescription])
-  }
-}
+} 

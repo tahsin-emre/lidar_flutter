@@ -13,7 +13,7 @@ class AROverlayInstructions extends StatelessWidget {
           left: 16,
           right: 16,
           child: Card(
-            color: Colors.black.withOpacity(0.7),
+            color: const Color.fromRGBO(0, 0, 0, 0.7),
             child: Padding(
               padding: const EdgeInsets.all(12.0),
               child: Column(
@@ -32,9 +32,9 @@ class AROverlayInstructions extends StatelessWidget {
                         style: Theme.of(
                           context,
                         ).textTheme.titleMedium?.copyWith(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                        ),
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                            ),
                       ),
                     ],
                   ),
@@ -99,7 +99,7 @@ class AROverlayInstructions extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: Colors.blue.withOpacity(0.8),
+        color: const Color.fromRGBO(33, 150, 243, 0.8),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Column(

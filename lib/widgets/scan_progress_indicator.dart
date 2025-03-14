@@ -1,107 +1,153 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:lidar_flutter/state/scan_state.dart';
+import '../state/scan_state.dart';
 
 class ScanProgressIndicator extends StatelessWidget {
-  final VoidCallback onStartScan;
-  final VoidCallback onPauseScan;
-  final VoidCallback onResumeScan;
-  final VoidCallback onCompleteScan;
-  final VoidCallback onCancelScan;
+  final ScanState scanState;
+  final VoidCallback? onPauseTap;
+  final VoidCallback? onResetTap;
+  final VoidCallback? onCompleteTap;
 
   const ScanProgressIndicator({
     Key? key,
-    required this.onStartScan,
-    required this.onPauseScan,
-    required this.onResumeScan,
-    required this.onCompleteScan,
-    required this.onCancelScan,
+    required this.scanState,
+    this.onPauseTap,
+    this.onResetTap,
+    this.onCompleteTap,
   }) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<ScanState>(
-      builder: (context, scanState, child) {
-        // Tarama başlamadıysa başlat butonu göster
-        if (scanState.status == ScanningStatus.notStarted) {
-          return _buildStartButton();
-        }
+    final theme = Theme.of(context);
 
-        // Tarama devam ediyorsa ilerleme göstergesi ve kontrol butonlarını göster
-        return Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16.0),
-              child: LinearProgressIndicator(
-                value: scanState.progress,
-                backgroundColor: Colors.grey[300],
-                valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: const BoxDecoration(
+        color: Color.fromRGBO(0, 0, 0, 0.7),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // İlerleme çubuğu
+          LinearProgressIndicator(
+            value: scanState.progress,
+            backgroundColor: Colors.grey[800],
+            valueColor:
+                AlwaysStoppedAnimation<Color>(theme.colorScheme.primary),
+            minHeight: 8,
+            borderRadius: BorderRadius.circular(4),
+          ),
+
+          const SizedBox(height: 8),
+
+          // İlerleme yüzdesi ve 360 derece bilgisi
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // İlerleme yüzdesi
+              Text(
+                '${(scanState.progress * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              scanState.statusMessage,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: [
-                _buildCancelButton(),
-                scanState.isScanning
-                    ? _buildPauseButton()
-                    : _buildResumeButton(),
-                _buildCompleteButton(),
-              ],
-            ),
-          ],
-        );
-      },
-    );
-  }
 
-  Widget _buildStartButton() {
-    return ElevatedButton.icon(
-      icon: const Icon(Icons.play_arrow),
-      label: const Text('Start Scan'),
-      onPressed: onStartScan,
-      style: ElevatedButton.styleFrom(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              // 360 derece segment bilgisi
+              if (scanState.completedSegments > 0)
+                Padding(
+                  padding: const EdgeInsets.only(left: 16),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.rotate_right,
+                          color: Colors.white, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${scanState.completedSegments}/${scanState.totalSegments}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Butonlar
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // Sıfırla butonu
+              if (onResetTap != null)
+                _buildIconButton(
+                  icon: Icons.refresh,
+                  label: 'Sıfırla',
+                  onTap: onResetTap!,
+                ),
+
+              // Duraklat/Devam butonu
+              if (onPauseTap != null)
+                _buildIconButton(
+                  icon: scanState.isPaused ? Icons.play_arrow : Icons.pause,
+                  label: scanState.isPaused ? 'Devam' : 'Duraklat',
+                  onTap: onPauseTap!,
+                ),
+
+              // Tamamla butonu
+              if (onCompleteTap != null)
+                _buildIconButton(
+                  icon: Icons.check_circle,
+                  label: 'Tamamla',
+                  onTap: onCompleteTap!,
+                  primary: true,
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildPauseButton() {
-    return IconButton(
-      icon: const Icon(Icons.pause),
-      onPressed: onPauseScan,
-      tooltip: 'Pause Scan',
-    );
-  }
-
-  Widget _buildResumeButton() {
-    return IconButton(
-      icon: const Icon(Icons.play_arrow),
-      onPressed: onResumeScan,
-      tooltip: 'Resume Scan',
-    );
-  }
-
-  Widget _buildCompleteButton() {
-    return IconButton(
-      icon: const Icon(Icons.check),
-      onPressed: onCompleteScan,
-      tooltip: 'Complete Scan',
-    );
-  }
-
-  Widget _buildCancelButton() {
-    return IconButton(
-      icon: const Icon(Icons.close),
-      onPressed: onCancelScan,
-      tooltip: 'Cancel Scan',
+  Widget _buildIconButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool primary = false,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: primary
+              ? const Color.fromRGBO(33, 150, 243, 0.8)
+              : const Color.fromRGBO(158, 158, 158, 0.3),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

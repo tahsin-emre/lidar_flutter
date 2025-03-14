@@ -1,7 +1,5 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
-import 'package:path_provider/path_provider.dart';
 
 class ViewerScreen extends StatefulWidget {
   const ViewerScreen({super.key, this.initialModelPath});
@@ -46,24 +44,28 @@ class _ViewerScreenState extends State<ViewerScreen> {
         'assets/models/sample_model_2.glb',
       ];
 
-      setState(() {
-        _availableModels = models;
+      if (mounted) {
+        setState(() {
+          _availableModels = models;
 
-        // Select the first model if none is selected and we have models
-        if (_selectedModel == null && models.isNotEmpty) {
-          _selectedModel = models.first;
-        }
+          // Select the first model if none is selected and we have models
+          if (_selectedModel == null && models.isNotEmpty) {
+            _selectedModel = models.first;
+          }
 
-        _isLoading = false;
-      });
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error loading models: ${e.toString()}')),
-      );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error loading models: ${e.toString()}')),
+        );
+      }
     }
   }
 
@@ -82,10 +84,9 @@ class _ViewerScreenState extends State<ViewerScreen> {
             ),
         ],
       ),
-      body:
-          _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _availableModels.isEmpty
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : _availableModels.isEmpty
               ? _buildEmptyState()
               : _buildModelViewer(),
     );
@@ -138,14 +139,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                       });
                     }
                   },
-                  items:
-                      _availableModels.map((model) {
-                        final name = model.split('/').last;
-                        return DropdownMenuItem(
-                          value: model,
-                          child: Text(name),
-                        );
-                      }).toList(),
+                  items: _availableModels.map((model) {
+                    final name = model.split('/').last;
+                    return DropdownMenuItem(
+                      value: model,
+                      child: Text(name),
+                    );
+                  }).toList(),
                 ),
               ),
             ),
@@ -154,28 +154,27 @@ class _ViewerScreenState extends State<ViewerScreen> {
 
         // Model viewer
         Expanded(
-          child:
-              _selectedModel == null
-                  ? const Center(child: Text('Select a model to view'))
-                  : Container(
-                    color: Colors.black12,
-                    padding: const EdgeInsets.all(8.0),
-                    child: ModelViewer(
-                      backgroundColor: const Color.fromARGB(
-                        0xFF,
-                        0xEE,
-                        0xEE,
-                        0xEE,
-                      ),
-                      src: _selectedModel!,
-                      alt: 'A 3D model',
-                      ar: true,
-                      arModes: const ['scene-viewer', 'webxr', 'quick-look'],
-                      autoRotate: true,
-                      cameraControls: true,
-                      shadowIntensity: 1,
+          child: _selectedModel == null
+              ? const Center(child: Text('Select a model to view'))
+              : Container(
+                  color: Colors.black12,
+                  padding: const EdgeInsets.all(8.0),
+                  child: ModelViewer(
+                    backgroundColor: const Color.fromARGB(
+                      0xFF,
+                      0xEE,
+                      0xEE,
+                      0xEE,
                     ),
+                    src: _selectedModel!,
+                    alt: 'A 3D model',
+                    ar: true,
+                    arModes: const ['scene-viewer', 'webxr', 'quick-look'],
+                    autoRotate: true,
+                    cameraControls: true,
+                    shadowIntensity: 1,
                   ),
+                ),
         ),
 
         // Model controls
@@ -189,11 +188,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 label: 'AR View',
                 onPressed: () {
                   // In a real app, this would open the AR view of the model
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('AR View not implemented in sample'),
-                    ),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('AR View not implemented in sample'),
+                      ),
+                    );
+                  }
                 },
               ),
               _buildControlButton(
@@ -201,11 +202,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 label: 'Share',
                 onPressed: () {
                   // In a real app, this would share the model file
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Sharing not implemented in sample'),
-                    ),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Sharing not implemented in sample'),
+                      ),
+                    );
+                  }
                 },
               ),
               _buildControlButton(
@@ -213,11 +216,13 @@ class _ViewerScreenState extends State<ViewerScreen> {
                 label: 'Delete',
                 onPressed: () {
                   // In a real app, this would delete the model file
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Delete not implemented in sample'),
-                    ),
-                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Delete not implemented in sample'),
+                      ),
+                    );
+                  }
                 },
               ),
             ],

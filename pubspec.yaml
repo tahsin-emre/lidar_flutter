@@ -40,7 +40,7 @@ dependencies:
   cupertino_icons: ^1.0.6
 
   # AR and 3D
-  arkit_plugin: ^1.0.7
+  arkit_plugin: ^1.1.2
   model_viewer_plus: ^1.6.1
   
   # 3D model manipulation and viewing

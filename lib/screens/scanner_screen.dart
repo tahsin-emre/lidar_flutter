@@ -2,9 +2,10 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:lidar_flutter/state/scan_state.dart';
-import 'package:lidar_flutter/widgets/scan_progress_indicator.dart';
-import 'package:lidar_flutter/screens/model_viewer_screen.dart';
+import 'package:flutter/foundation.dart' show kDebugMode;
+import '../state/scan_state.dart';
+import '../widgets/scan_progress_indicator.dart';
+import 'model_viewer_screen.dart';
 import 'package:arkit_plugin/arkit_plugin.dart';
 
 class ScannerScreen extends StatefulWidget {
@@ -16,33 +17,34 @@ class ScannerScreen extends StatefulWidget {
 
 class _ScannerScreenState extends State<ScannerScreen>
     with WidgetsBindingObserver {
-  final MethodChannel platform = const MethodChannel(
-    'com.example.lidar_flutter/scanner',
-  );
+  // Metod kanalı ve event kanalı tanımları
+  static const methodChannel = MethodChannel('lidar_flutter/ar_scanner');
+  static const scanEventChannel = EventChannel('lidar_flutter/scan_events');
+  final MethodChannel scanServiceChannel =
+      const MethodChannel('lidar_flutter/scan_service');
 
-  // AR Scanner channel
-  final MethodChannel arScanChannel = const MethodChannel(
-    'lidar_flutter/ar_scanner',
-  );
+  // Logger tanımı
+  final _devLog = kDebugMode ? print : (String message) {};
 
-  // Scan service channel
-  final MethodChannel scanServiceChannel = const MethodChannel(
-    'lidar_flutter/scan_service',
-  );
-  bool _isInitialized = false;
   bool _isPaused = false;
+  bool _isProcessing = false;
+  bool _showCompleteScanButton = false;
   dynamic _arController; // can be ARKitController on iOS
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    Future.microtask(_initializeAR);
+    _initARScanner();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _listenToScanEvents();
+    });
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _pauseScan(); // Taramayı durdur
     _disposeAR();
     super.dispose();
   }
@@ -50,9 +52,9 @@ class _ScannerScreenState extends State<ScannerScreen>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.paused) {
-      _pauseAR();
+      _pauseScan();
     } else if (state == AppLifecycleState.resumed) {
-      _resumeAR();
+      _resumeScan();
     }
   }
 
@@ -65,358 +67,397 @@ class _ScannerScreenState extends State<ScannerScreen>
     }
   }
 
-  Future<bool> _checkLiDARSupport() async {
+  // AR tarayıcıyı başlat
+  Future<void> _initARScanner() async {
     try {
-      final bool hasLiDAR = await arScanChannel.invokeMethod('supportsLiDAR');
-      return hasLiDAR;
+      final scanState = Provider.of<ScanState>(context, listen: false);
+      scanState.startScan();
+
+      // ARKit yapılandırması
+      final bool result = await methodChannel.invokeMethod<bool>(
+            'setupARKitConfig',
+            {'enableLiDAR': true, 'enableMesh': true},
+          ) ??
+          false;
+
+      _devLog('ARKit yapılandırması: $result');
+
+      if (result) {
+        // Tarama başlatma
+        final scanResult =
+            await scanServiceChannel.invokeMethod<bool>('initializeScan') ??
+                false;
+
+        if (scanResult) {
+          _devLog('Tarama başlatıldı');
+          // AR oturumunu başlat
+          await methodChannel.invokeMethod<bool>('startScanning');
+        }
+      }
     } catch (e) {
-      print('Error checking LiDAR support: $e');
-      return false;
+      _devLog('ARKit başlatma hatası: $e');
+      // Hata durumunda kullanıcıya bilgi ver
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('AR tarayıcı başlatılamadı: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
     }
   }
 
-  // AR görünümü initialize etme
-  void _initializeAR() async {
-    final scanState = Provider.of<ScanState>(context, listen: false);
-    scanState.reset();
+  // Taramayı duraklatıp devam ettir
+  void _togglePause() {
+    if (_isPaused) {
+      _resumeScan();
+    } else {
+      _pauseScan();
+    }
+    setState(() {
+      _isPaused = !_isPaused;
+    });
+  }
 
+  // Taramayı duraklat
+  Future<void> _pauseScan() async {
     try {
-      // Cihaz desteğini kontrol et
-      final bool hasSupport =
-          await scanServiceChannel.invokeMethod('checkDeviceSupport');
+      await methodChannel.invokeMethod<void>('pauseScan');
+    } catch (e) {
+      _devLog('Error pausing scan: $e');
+    }
+  }
 
-      if (!hasSupport) {
-        scanState.failScan('Your device does not support LiDAR or Depth API.');
+  // Taramayı devam ettir
+  Future<void> _resumeScan() async {
+    try {
+      await methodChannel.invokeMethod<void>('resumeScan');
+    } catch (e) {
+      _devLog('Error resuming scan: $e');
+    }
+  }
+
+  // Taramayı sıfırla
+  Future<void> _resetScan() async {
+    try {
+      await methodChannel.invokeMethod<void>('resetScan');
+      setState(() {
+        _isPaused = false;
+        _showCompleteScanButton = false;
+      });
+    } catch (e) {
+      _devLog('Error resetting scan: $e');
+    }
+  }
+
+  // Tarama olaylarını dinle
+  void _listenToScanEvents() {
+    scanEventChannel.receiveBroadcastStream().listen((dynamic event) {
+      if (event is! Map) {
         return;
       }
+      if (!mounted) {
+        return; // Eğer widget artık build ağacında değilse, işlemleri atlayalım
+      }
 
-      // AR oturumu başlat
-      await scanServiceChannel.invokeMethod('initializeScan');
+      final scanState = Provider.of<ScanState>(context, listen: false);
+      final eventType = event['type'] as String?;
 
-      // Durumu güncelle
-      setState(() {
-        _isInitialized = true;
-      });
-    } catch (e) {
-      print('Error initializing AR: $e');
-      scanState.failScan('Failed to initialize scanner. ${e.toString()}');
-    }
-  }
+      switch (eventType) {
+        case 'scanProgress':
+          final progress = event['progress'] as double? ?? 0.0;
+          final completedSegments = event['completedSegments'] as int? ?? 0;
+          final totalSegments = event['totalSegments'] as int? ?? 0;
 
-  void _onARKitViewCreated(ARKitController controller) {
-    _arController = controller;
+          if (mounted) {
+            setState(() {
+              scanState.updateProgress(progress);
 
-    try {
-      // Point cloud verileri için dinleyici ekle
-      controller.onAddNodeForAnchor = _handleAddAnchorNode;
-
-      // LiDAR desteğini kontrol et ve ARKit oturumunu ayarla
-      _checkLiDARSupport().then((hasLiDAR) {
-        print("LiDAR desteği: $hasLiDAR");
-
-        // ARKit konfigürasyonu gönder
-        if (hasLiDAR) {
-          try {
-            // iOS 14+ için konfigürasyon ayarla
-            arScanChannel.invokeMethod(
-                'setupARKitConfig', {'enableLiDAR': true, 'enableMesh': true});
-          } catch (e) {
-            print("ARKit yapılandırma hatası: $e");
+              // 360 derece tamamlanma durumunu güncelle
+              if (totalSegments > 0) {
+                scanState.updateScanCoverage(completedSegments, totalSegments);
+              }
+            });
           }
-        }
+          break;
 
-        // Tarama durumunu güncelle
-        final scanState = Provider.of<ScanState>(context, listen: false);
-        scanState.updateProgress(0.0, 'Ready to scan. Move around the object.');
-      });
-    } catch (e) {
-      print("ARKit controller oluşturma hatası: $e");
-    }
-  }
+        case 'guidance':
+          final message = event['message'] as String? ?? '';
+          if (mounted) {
+            setState(() {
+              scanState.updateGuidanceMessage(message);
+            });
+          }
+          break;
 
-  void _handleAddAnchorNode(ARKitAnchor anchor) {
-    // ARKit için anchor eklendiğinde haberdar ol
-    print('Anchor added: ${anchor.identifier}');
+        case 'scanStatus':
+          final status = event['status'] as String? ?? '';
 
-    try {
-      // Anchor tipini tespit et - basit bir kontrol
-      if (anchor is ARKitPlaneAnchor) {
-        // Düzlem algılandı
-        print('Düzlem algılandı: ${anchor.identifier}');
+          if (status == 'completed') {
+            // Otomatik tarama tamamlandı, 3D modeli oluştur
+            _processAndExportModel();
+          } else if (status == 'failed') {
+            final message = event['message'] as String? ?? 'Bilinmeyen hata';
+            if (mounted) {
+              setState(() {
+                scanState.updateGuidanceMessage('Tarama hatası: $message');
+              });
+            }
+          } else if (status == 'readyToComplete') {
+            // Tam 360 derece tarama tamamlandıysa
+            if (scanState.isFullyCovered) {
+              _processAndExportModel();
+            } else {
+              if (mounted) {
+                setState(() {
+                  scanState.updateGuidanceMessage(
+                      'Tarama hazır! Tamamlamak için butona basın.');
+                  _showCompleteScanButton = true;
+                });
+              }
+            }
+          }
+          break;
 
-        // Düzlemin boyutu hakkında bilgi
-        final ARKitPlaneAnchor planeAnchor = anchor;
-        print('Düzlem boyutu: ${planeAnchor.extent}');
-      } else {
-        // Diğer anchor tipleri
-        print('Diğer anchor tipi algılandı');
+        case 'error':
+          final message = event['message'] as String? ?? 'Bilinmeyen hata';
+          if (mounted) {
+            setState(() {
+              scanState.updateGuidanceMessage('Hata: $message');
+            });
+          }
+          break;
       }
-    } catch (e) {
-      print("Anchor işleme hatası: $e");
-    }
+    }, onError: (error) {
+      _devLog('Event channel error: $error');
+    });
   }
 
-  void _startScan() async {
-    final scanState = Provider.of<ScanState>(context, listen: false);
-    scanState.startScan();
-
-    try {
-      await scanServiceChannel.invokeMethod('startScan');
-
-      // Simüle tarama ilerleme güncellemeleri başlat
-      _simulateScanProgress();
-    } catch (e) {
-      print('Error starting scan: $e');
-      scanState.failScan('Failed to start scan: ${e.toString()}');
-    }
-  }
-
-  void _pauseAR() async {
+  // 3D modeli işle ve view ekranına git
+  Future<void> _processAndExportModel() async {
     setState(() {
-      _isPaused = true;
+      _isProcessing = true;
     });
 
-    // AR oturumunu duraklat
-    if (_arController != null) {
-      if (Platform.isIOS) {
-        // ArKit pause işlemi
-        arScanChannel.invokeMethod('pauseSession');
-      } else {
-        scanServiceChannel.invokeMethod('pauseScan');
-      }
-    }
-  }
-
-  void _resumeAR() async {
-    setState(() {
-      _isPaused = false;
-    });
-
-    // AR oturumunu devam ettir
-    if (_arController != null) {
-      if (Platform.isIOS) {
-        // ArKit resume işlemi
-        arScanChannel.invokeMethod('resumeSession');
-      } else {
-        scanServiceChannel.invokeMethod('resumeScan');
-      }
-    }
-  }
-
-  void _completeScan() async {
-    final scanState = Provider.of<ScanState>(context, listen: false);
-
     try {
-      final result = await scanServiceChannel.invokeMethod('completeScan');
+      final result =
+          await scanServiceChannel.invokeMethod<Map<dynamic, dynamic>>(
+        'processAndExportModel',
+      );
 
-      if (result != null && result['modelPath'] != null) {
-        // 3D modeli görüntülemek için modeli tamamla ve yolu kaydet
-        scanState.completeScan(result['modelPath']);
-      }
-    } catch (e) {
-      print('Error completing scan: $e');
-      scanState.failScan('Failed to complete scan: ${e.toString()}');
-    }
-  }
+      if (result != null && result.containsKey('modelPath')) {
+        final modelPath = result['modelPath'] as String;
+        _devLog('3D model oluşturuldu: $modelPath');
 
-  void _cancelScan() {
-    // Taramayı iptal et ve AR oturumunu kapat
-    scanServiceChannel.invokeMethod('cancelScan');
+        // İşlem tamamlandı, model görüntüleme ekranına git
+        if (mounted) {
+          setState(() {
+            _isProcessing = false;
+          });
 
-    final scanState = Provider.of<ScanState>(context, listen: false);
-    scanState.reset();
-
-    // Ekranı kapat
-    Navigator.pop(context);
-  }
-
-  // İlerlemeyi simüle et (gerçek uygulamada, platform kanalı üzerinden ilerleme güncellemeleri alınır)
-  void _simulateScanProgress() async {
-    final scanState = Provider.of<ScanState>(context, listen: false);
-    double progress = 0.0;
-
-    // Her 500ms'de bir ilerleme güncelle
-    while (progress < 1.0 && mounted && !_isPaused) {
-      await Future.delayed(const Duration(milliseconds: 500));
-      progress += 0.05;
-      if (progress > 1.0) progress = 1.0;
-
-      String message = 'Scanning...';
-      if (progress < 0.3) {
-        message = 'Start moving around the object...';
-      } else if (progress < 0.7) {
-        message = 'Continue scanning all sides...';
-      } else {
-        message = 'Almost done, capturing details...';
-      }
-
-      scanState.updateProgress(progress, message);
-    }
-  }
-
-  // AR görünümü oluşturma metodu
-  Widget _buildARView() {
-    if (Platform.isIOS) {
-      try {
-        return ARKitSceneView(
-          onARKitViewCreated: _onARKitViewCreated,
-          enableTapRecognizer: true,
-          showStatistics: true,
-          enablePinchRecognizer: true,
-          enablePanRecognizer: true,
-          enableRotationRecognizer: true,
-          configuration: ARKitConfiguration.worldTracking,
-        );
-      } catch (e) {
-        print("ARKit View oluşturma hatası: $e");
-        // ARKit plugin hatası durumunda yedek görünüm
-        return Container(
-          color: Colors.black,
-          child: const Center(
-            child: Text(
-              'LiDAR hatası. Cihazınız LiDAR sensörü ile donatılmış mı?',
-              style: TextStyle(color: Colors.white),
-              textAlign: TextAlign.center,
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (context) => ModelViewerScreen(modelPath: modelPath),
             ),
-          ),
-        );
+          );
+        }
+      } else {
+        throw Exception('3D model oluşturulamadı');
       }
-    } else {
-      // Android için AR görünümü (gerçekte ARCore widget'ı kullanılacak)
-      return Container(
-        color: Colors.black,
-        child: const Center(
-          child: Text(
-            'Android ARCore taraması bu sürümde etkinleştirilmemiş.',
-            style: TextStyle(color: Colors.white),
-            textAlign: TextAlign.center,
-          ),
+    } catch (e) {
+      _devLog('Model işleme hatası: $e');
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+
+        _showErrorDialog(
+            'Model oluşturma hatası', 'Model işlenirken bir hata oluştu: $e');
+      }
+    }
+  }
+
+  void _showErrorDialog(String title, String message) {
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(title),
+          content: Text(message),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('Tamam'),
+            ),
+          ],
         ),
       );
     }
   }
 
+  // ScanProgressIndicator içinde tamamlama butonunu ekle
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('3D Scanner'),
-        centerTitle: true,
+        title: const Text('3D Tarayıcı'),
         actions: [
-          IconButton(icon: const Icon(Icons.close), onPressed: _cancelScan),
+          IconButton(
+            icon: Icon(_isPaused ? Icons.play_arrow : Icons.pause),
+            onPressed: _togglePause,
+          ),
         ],
       ),
-      body: Consumer<ScanState>(
-        builder: (context, scanState, child) {
-          // Make sure scanState is not null before accessing properties
-          if (scanState != null && scanState.isFailed) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline, size: 48, color: Colors.red),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Scan Failed',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 24),
-                    child: Text(
-                      scanState.errorMessage,
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: _initializeAR,
-                    child: const Text('Try Again'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          if (scanState != null &&
-              scanState.isCompleted &&
-              scanState.modelPath != null) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.check_circle, size: 48, color: Colors.green),
-                  const SizedBox(height: 16),
-                  Text(
-                    'Scan Completed!',
-                    style: Theme.of(context).textTheme.headlineSmall,
-                  ),
-                  const SizedBox(height: 8),
-                  const Text('Your 3D model is ready to view.'),
-                  const SizedBox(height: 24),
-                  ElevatedButton(
-                    onPressed: () {
-                      // Navigate to model viewer
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(
-                          builder: (context) => ModelViewerScreen(
-                            modelPath: scanState.modelPath!,
-                            modelName: 'Scanned Object',
-                          ),
-                        ),
-                      );
+      body: Stack(
+        children: [
+          // AR view platform view
+          SizedBox.expand(
+            child: Platform.isIOS
+                ? UiKitView(
+                    viewType: 'lidar_flutter/ar_view',
+                    onPlatformViewCreated: (int id) {
+                      _devLog('ARKit view oluşturuldu: $id');
                     },
-                    child: const Text('View Model'),
-                  ),
-                ],
-              ),
-            );
-          }
-
-          // AR Scanning View
-          return Stack(
-            children: [
-              // AR View implementation
-              SizedBox(
-                width: double.infinity,
-                height: double.infinity,
-                child: _isInitialized
-                    ? _buildARView()
-                    : Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            CircularProgressIndicator(),
-                            SizedBox(height: 16),
-                            Text('Initializing scanner...'),
-                          ],
-                        ),
-                      ),
-              ),
-
-              // Bottom controls
-              if (_isInitialized)
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 24,
-                  child: SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16.0),
-                      child: ScanProgressIndicator(
-                        onStartScan: _startScan,
-                        onPauseScan: _pauseAR,
-                        onResumeScan: _resumeAR,
-                        onCompleteScan: _completeScan,
-                        onCancelScan: _cancelScan,
-                      ),
+                    creationParams: <String, dynamic>{
+                      'enableLiDAR': true,
+                      'enableMesh': true,
+                    },
+                    creationParamsCodec: const StandardMessageCodec(),
+                  )
+                : Container(
+                    color: Colors.black,
+                    child: const Center(
+                      child: Text(
+                          'Bu cihaz AR tarama özelliklerini desteklemiyor',
+                          style: TextStyle(color: Colors.white)),
                     ),
                   ),
+          ),
+
+          // Overlay for scan progress and guidance
+          SafeArea(
+            child: Column(
+              children: [
+                // Guidance at the top
+                Consumer<ScanState>(
+                  builder: (context, scanState, child) {
+                    return Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            vertical: 8, horizontal: 16),
+                        decoration: BoxDecoration(
+                          color: const Color.fromRGBO(0, 0, 0, 0.6),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          scanState.guidanceMessage,
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 16),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    );
+                  },
                 ),
-            ],
-          );
-        },
+
+                const Spacer(),
+
+                // Butonlar (İlerleme çubuğu olmadan)
+                Consumer<ScanState>(
+                  builder: (context, scanState, child) {
+                    return Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                        children: [
+                          // Sıfırlama butonu
+                          _buildActionButton(
+                            icon: Icons.refresh,
+                            label: 'Sıfırla',
+                            onTap: _resetScan,
+                          ),
+
+                          // Duraklat/Devam butonu
+                          _buildActionButton(
+                            icon: _isPaused ? Icons.play_arrow : Icons.pause,
+                            label: _isPaused ? 'Devam' : 'Duraklat',
+                            onTap: _togglePause,
+                          ),
+
+                          // Tamamla butonu
+                          if (_showCompleteScanButton)
+                            _buildActionButton(
+                              icon: Icons.check_circle,
+                              label: 'Tamamla',
+                              onTap: _processAndExportModel,
+                              isPrimary: true,
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          // Processing overlay
+          if (_isProcessing)
+            Container(
+              color: const Color.fromRGBO(0, 0, 0, 0.7),
+              child: const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(color: Colors.white),
+                    SizedBox(height: 16),
+                    Text(
+                      '3D Model Oluşturuluyor...',
+                      style: TextStyle(color: Colors.white, fontSize: 18),
+                    )
+                  ],
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    bool isPrimary = false,
+  }) {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 8),
+      child: ElevatedButton(
+        onPressed: onTap,
+        style: ElevatedButton.styleFrom(
+          backgroundColor: isPrimary
+              ? Colors.blue.withOpacity(0.8)
+              : Colors.grey.withOpacity(0.3),
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 24),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(fontSize: 12),
+            ),
+          ],
+        ),
       ),
     );
   }
