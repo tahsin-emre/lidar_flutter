@@ -35,13 +35,13 @@ class _ScannerScreenState extends State<ScannerScreen>
     WidgetsBinding.instance.addObserver(this);
 
     // AR tarayıcıyı asenkron olarak başlat
-    _initARScanner().catchError((error) {
-      logger.error('AR tarayıcı başlatma hatası', exception: error);
-      _showError('AR tarayıcı başlatılamadı', error.toString());
-    });
 
     // Event dinleyiciyi bir sonraki frame'de başlat
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _initARScanner().catchError((error) {
+        logger.error('AR tarayıcı başlatma hatası', exception: error);
+        _showError('AR tarayıcı başlatılamadı', error.toString());
+      });
       if (mounted) {
         _listenToScanEvents();
       }

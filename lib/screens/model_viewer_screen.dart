@@ -26,7 +26,7 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
   @override
   void initState() {
     super.initState();
-    _prepareModel();
+    Future.microtask(_prepareModel);
   }
 
   Future<void> _prepareModel() async {
