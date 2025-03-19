@@ -16,8 +16,8 @@ mixin ScanUIMixin<T extends StatefulWidget> on State<T> {
         onPressed: onTap,
         style: ElevatedButton.styleFrom(
           backgroundColor: isPrimary
-              ? Colors.blue.withOpacity(0.8)
-              : Colors.grey.withOpacity(0.3),
+              ? Colors.blue.withValues(alpha: .8)
+              : Colors.grey.withValues(alpha: .3),
           foregroundColor: Colors.white,
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
           shape: RoundedRectangleBorder(
@@ -48,7 +48,7 @@ mixin ScanUIMixin<T extends StatefulWidget> on State<T> {
                 logger.logInfo('ARKit view oluşturuldu: $id',
                     tag: 'ScannerScreen');
               },
-              creationParams: <String, dynamic>{
+              creationParams: const <String, dynamic>{
                 'enableLiDAR': true,
                 'enableMesh': true,
               },

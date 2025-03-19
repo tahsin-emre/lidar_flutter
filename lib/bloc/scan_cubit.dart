@@ -82,7 +82,9 @@ class ScanCubit extends Cubit<ScanState> {
 
   void updateScanCoverage(int completedSegments, int totalSegments) {
     if (state.completedSegments == completedSegments &&
-        state.totalSegments == totalSegments) return;
+        state.totalSegments == totalSegments) {
+      return;
+    }
 
     emit(state.copyWith(
       completedSegments: completedSegments,

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:logging/logging.dart';
 
 final logger = Logger('LidarFlutter');
@@ -5,9 +6,13 @@ final logger = Logger('LidarFlutter');
 void initLogger() {
   Logger.root.level = Level.ALL;
   Logger.root.onRecord.listen((record) {
-    print('${record.level.name}: ${record.time}: ${record.message}');
+    if (kDebugMode) {
+      print('${record.level.name}: ${record.time}: ${record.message}');
+    }
     if (record.error != null) {
-      print('Error: ${record.error}');
+      if (kDebugMode) {
+        print('Error: ${record.error}');
+      }
     }
   });
 }

@@ -1,8 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lidar_flutter/screens/mixin/home_mixin.dart';
-import 'package:lidar_flutter/screens/scanner_screen.dart';
 import 'package:lidar_flutter/screens/viewer_screen.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});

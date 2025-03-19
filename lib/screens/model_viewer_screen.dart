@@ -4,7 +4,6 @@ import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
 import 'package:share_plus/share_plus.dart';
-import '../services/logger_service.dart';
 
 class ModelViewerScreen extends StatefulWidget {
   final String modelPath;
