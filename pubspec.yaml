@@ -30,9 +30,10 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  logging: ^1.2.0
 
   # Core
-  provider: ^6.0.5
+  flutter_bloc: ^9.1.0
   path_provider: ^2.1.1
   path: ^1.8.3
   
@@ -115,5 +116,4 @@ flutter:
   # Assets used by the app
   assets:
     - assets/images/
-    - assets/animations/
     - assets/models/

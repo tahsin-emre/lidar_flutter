@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
-import 'package:lidar_flutter/state/scan_state.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:lidar_flutter/bloc/scan_cubit.dart';
 import 'package:lidar_flutter/screens/scanner_screen.dart';
 
 void main() {
@@ -13,10 +13,8 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MultiProvider(
-      providers: [
-        ChangeNotifierProvider(create: (_) => ScanState()),
-      ],
+    return BlocProvider(
+      create: (_) => ScanCubit(),
       child: MaterialApp(
         title: '3D Scanner',
         theme: ThemeData(

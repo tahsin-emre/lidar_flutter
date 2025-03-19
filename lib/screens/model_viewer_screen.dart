@@ -34,8 +34,8 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
       // Model dosyasının var olduğunu kontrol et
       final file = File(widget.modelPath);
       if (!await file.exists()) {
-        logger.error('Model dosyası bulunamadı: ${widget.modelPath}',
-            tag: 'ModelViewer');
+        // logger.error('Model dosyası bulunamadı: ${widget.modelPath}',
+        //     tag: 'ModelViewer');
         if (mounted) {
           _showError('Model dosyası bulunamadı');
         }
@@ -43,7 +43,7 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
       }
 
       modelName = path.basename(widget.modelPath);
-      logger.info('Model yükleniyor: $modelName', tag: 'ModelViewer');
+      // logger.info('Model yükleniyor: $modelName', tag: 'ModelViewer');
 
       // Modeli yüklemeden önce kısa bir gecikme (UI için)
       await Future.delayed(const Duration(milliseconds: 200));
@@ -54,7 +54,7 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
         });
       }
     } catch (e) {
-      logger.error('Model hazırlama hatası', exception: e, tag: 'ModelViewer');
+      // logger.error('Model hazırlama hatası', exception: e, tag: 'ModelViewer');
       if (mounted) {
         _showError('Model hazırlanırken bir hata oluştu: $e');
       }
@@ -72,14 +72,14 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
       final filePath = widget.modelPath;
       final file = XFile(filePath);
 
-      logger.info('Model paylaşılıyor: $filePath', tag: 'ModelViewer');
+      // logger.info('Model paylaşılıyor: $filePath', tag: 'ModelViewer');
 
       await Share.shareXFiles(
         [file],
         text: '3D Tarama Modelim: $modelName',
       );
     } catch (e) {
-      logger.error('Model paylaşma hatası', exception: e, tag: 'ModelViewer');
+      // logger.error('Model paylaşma hatası', exception: e, tag: 'ModelViewer');
       if (mounted) {
         _showError('Paylaşım sırasında bir hata oluştu: $e');
       }
@@ -135,9 +135,9 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
         }
       }
 
-      logger.info('Model kaydedildi: $savedPath', tag: 'ModelViewer');
+      // logger.info('Model kaydedildi: $savedPath', tag: 'ModelViewer');
     } catch (e) {
-      logger.error('Model kaydetme hatası', exception: e, tag: 'ModelViewer');
+      // logger.error('Model kaydetme hatası', exception: e, tag: 'ModelViewer');
       if (mounted) {
         _showError('Kaydetme sırasında bir hata oluştu: $e');
       }

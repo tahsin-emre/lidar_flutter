@@ -52,15 +52,15 @@ EXTERNAL SOURCES:
     :path: ".symlinks/plugins/webview_flutter_wkwebview/darwin"
 
 SPEC CHECKSUMS:
-  arkit_plugin: 2c387e26e137de4bd1fc16ec2fabd05c84c5a817
+  arkit_plugin: c08c4e6f334a922154c2caf2f6fadfaefb51c181
   Flutter: e0871f40cf51350855a761d2e70bf5af5b9b5de7
-  flutter_isolate: ca1a284bbb8dcfeb26c4764794e0206f58ffa984
+  flutter_isolate: 0edf5081826d071adf21759d1eb10ff5c24503b5
   GLTFSceneKit: d1b437c514ba2aed5555afb0fddd64e030612d57
-  path_provider_foundation: 080d55be775b7414fd5a5ef3ac137b97b097e564
-  permission_handler_apple: 3787117e48f80715ff04a3830ca039283d6a4f29
-  share_plus: de6030e33b4e106470e09322d87cf2a4258d2d1d
-  url_launcher_ios: 694010445543906933d732453a59da0a173ae33d
-  webview_flutter_wkwebview: 1821ceac936eba6f7984d89a9f3bcb4dea99ebb2
+  path_provider_foundation: 2b6b4c569c0fb62ec74538f866245ac84301af46
+  permission_handler_apple: e76247795d700c14ea09e3a2d8855d41ee80a2e6
+  share_plus: c3fef564749587fc939ef86ffb283ceac0baf9f5
+  url_launcher_ios: 5334b05cef931de560670eeae103fd3e431ac3fe
+  webview_flutter_wkwebview: a4af96a051138e28e29f60101d094683b9f82188
 
 PODFILE CHECKSUM: b4448cdb88bbcbdb2486b5227ef9237a29d3dcb6
 

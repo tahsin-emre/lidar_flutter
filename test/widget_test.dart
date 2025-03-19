@@ -7,9 +7,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-//import 'package:provider/provider.dart';
 import 'package:lidar_flutter/main.dart';
-import 'package:lidar_flutter/state/scan_state.dart';
+import 'package:lidar_flutter/bloc/scan_cubit.dart';
 
 void main() {
   testWidgets('App başlık testi', (WidgetTester tester) async {
@@ -17,7 +16,7 @@ void main() {
     await tester.pumpWidget(const MyApp());
 
     // Verify that the app has the correct title
-    expect(find.text('3D Scanner App'), findsOneWidget);
+    expect(find.text('3D Scanner'), findsOneWidget);
   });
 
   testWidgets('Anasayfada tarama butonu var mı', (WidgetTester tester) async {
@@ -29,22 +28,22 @@ void main() {
     expect(find.byIcon(Icons.camera), findsOneWidget);
   });
 
-  test('ScanState test', () {
-    final scanState = ScanState();
+  test('ScanCubit test', () {
+    final cubit = ScanCubit();
 
     // Başlangıç durumu kontrolü
-    expect(scanState.status, ScanningStatus.notStarted);
-    expect(scanState.progress, 0.0);
-    expect(scanState.isScanning, false);
+    expect(cubit.state.status, ScanningStatus.notStarted);
+    expect(cubit.state.progress, 0.0);
+    expect(cubit.state.isScanning, false);
 
     // Tarama başlatma test
-    scanState.startScan();
-    expect(scanState.status, ScanningStatus.scanning);
-    expect(scanState.isScanning, true);
+    cubit.startScan();
+    expect(cubit.state.status, ScanningStatus.scanning);
+    expect(cubit.state.isScanning, true);
 
     // Taramayı duraklat
-    scanState.pauseScan();
-    expect(scanState.status, ScanningStatus.paused);
-    expect(scanState.isPaused, true);
+    cubit.pauseScan();
+    expect(cubit.state.status, ScanningStatus.paused);
+    expect(cubit.state.isPaused, true);
   });
 }

@@ -1,69 +1,35 @@
-import 'package:flutter/foundation.dart';
+import 'package:logging/logging.dart';
 
-enum LogLevel {
-  debug,
-  info,
-  warning,
-  error,
+final logger = Logger('LidarFlutter');
+
+void initLogger() {
+  Logger.root.level = Level.ALL;
+  Logger.root.onRecord.listen((record) {
+    print('${record.level.name}: ${record.time}: ${record.message}');
+    if (record.error != null) {
+      print('Error: ${record.error}');
+    }
+  });
 }
 
-class LoggerService {
-  static final LoggerService _instance = LoggerService._internal();
-
-  factory LoggerService() {
-    return _instance;
+extension LoggerExtension on Logger {
+  void debug(String message, {String? tag}) {
+    fine('${tag != null ? '[$tag] ' : ''}$message');
   }
 
-  LoggerService._internal();
-
-  final bool _enableConsoleOutput = kDebugMode;
-  LogLevel _currentLevel = LogLevel.debug;
-
-  void setLogLevel(LogLevel level) {
-    _currentLevel = level;
+  void logInfo(String message, {String? tag}) {
+    Level.INFO.value;
+    log(Level.INFO, '${tag != null ? '[$tag] ' : ''}$message');
   }
 
-  void debug(String message, {String tag = 'DEBUG'}) {
-    if (_currentLevel.index <= LogLevel.debug.index) {
-      _log(message, tag: tag);
+  void logWarning(String message, {String? tag}) {
+    log(Level.WARNING, '${tag != null ? '[$tag] ' : ''}$message');
+  }
+
+  void logError(String message, {String? tag, Object? exception}) {
+    log(Level.SEVERE, '${tag != null ? '[$tag] ' : ''}$message');
+    if (exception != null) {
+      log(Level.SEVERE, 'Exception: $exception');
     }
-  }
-
-  void info(String message, {String tag = 'INFO'}) {
-    if (_currentLevel.index <= LogLevel.info.index) {
-      _log(message, tag: tag);
-    }
-  }
-
-  void warning(String message, {String tag = 'WARNING'}) {
-    if (_currentLevel.index <= LogLevel.warning.index) {
-      _log(message, tag: tag);
-    }
-  }
-
-  void error(String message,
-      {String tag = 'ERROR', Object? exception, StackTrace? stackTrace}) {
-    if (_currentLevel.index <= LogLevel.error.index) {
-      _log(message, tag: tag);
-      if (exception != null) {
-        _log('Exception: $exception', tag: tag);
-      }
-      if (stackTrace != null) {
-        _log('StackTrace: $stackTrace', tag: tag);
-      }
-    }
-  }
-
-  void _log(String message, {required String tag}) {
-    final String timestamp = DateTime.now().toIso8601String();
-    final String formattedMessage = '[$timestamp] [$tag] $message';
-
-    if (_enableConsoleOutput) {
-      print(formattedMessage);
-    }
-
-    // Burada ileride dosyaya yazma, servis gönderme gibi işlemler eklenebilir
   }
 }
-
-final logger = LoggerService();
