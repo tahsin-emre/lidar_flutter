@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:model_viewer_plus/model_viewer_plus.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as path;
-// import 'package:share_plus/share_plus.dart';
+import 'package:share_plus/share_plus.dart';
+import '../services/logger_service.dart';
 
 class ModelViewerScreen extends StatefulWidget {
   final String modelPath;
@@ -20,6 +21,7 @@ class ModelViewerScreen extends StatefulWidget {
 class _ModelViewerScreenState extends State<ModelViewerScreen> {
   late String modelName;
   bool _isLoading = true;
+  bool _isProcessing = false; // İşlem yapılıyor mu?
 
   @override
   void initState() {
@@ -27,53 +29,145 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
     _prepareModel();
   }
 
-  void _prepareModel() {
-    modelName = path.basename(widget.modelPath);
+  Future<void> _prepareModel() async {
+    try {
+      // Model dosyasının var olduğunu kontrol et
+      final file = File(widget.modelPath);
+      if (!await file.exists()) {
+        logger.error('Model dosyası bulunamadı: ${widget.modelPath}',
+            tag: 'ModelViewer');
+        if (mounted) {
+          _showError('Model dosyası bulunamadı');
+        }
+        return;
+      }
 
-    Future.delayed(const Duration(milliseconds: 500), () {
+      modelName = path.basename(widget.modelPath);
+      logger.info('Model yükleniyor: $modelName', tag: 'ModelViewer');
+
+      // Modeli yüklemeden önce kısa bir gecikme (UI için)
+      await Future.delayed(const Duration(milliseconds: 200));
+
       if (mounted) {
         setState(() {
           _isLoading = false;
         });
       }
-    });
+    } catch (e) {
+      logger.error('Model hazırlama hatası', exception: e, tag: 'ModelViewer');
+      if (mounted) {
+        _showError('Model hazırlanırken bir hata oluştu: $e');
+      }
+    }
   }
 
   Future<void> _shareModel() async {
-    // Share.shareXFiles() yerine basit bir SnackBar gösterelim
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Modeli paylaş: ${widget.modelPath}')),
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      final filePath = widget.modelPath;
+      final file = XFile(filePath);
+
+      logger.info('Model paylaşılıyor: $filePath', tag: 'ModelViewer');
+
+      await Share.shareXFiles(
+        [file],
+        text: '3D Tarama Modelim: $modelName',
       );
+    } catch (e) {
+      logger.error('Model paylaşma hatası', exception: e, tag: 'ModelViewer');
+      if (mounted) {
+        _showError('Paylaşım sırasında bir hata oluştu: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
     }
   }
 
   Future<void> _saveModel() async {
+    if (_isProcessing) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
     try {
       final directory = await getApplicationDocumentsDirectory();
-      final savedPath = path.join(directory.path, 'saved_models', modelName);
+      final saveDir = path.join(directory.path, 'saved_models');
+      final savedPath = path.join(saveDir, modelName);
 
       // Dizini oluştur
-      final saveDir = Directory(path.dirname(savedPath));
-      if (!await saveDir.exists()) {
-        await saveDir.create(recursive: true);
+      final saveDirObj = Directory(saveDir);
+      if (!await saveDirObj.exists()) {
+        await saveDirObj.create(recursive: true);
       }
 
-      // Dosyayı kopyala
-      await File(widget.modelPath).copy(savedPath);
+      // Dosya zaten var mı kontrol et
+      final saveFile = File(savedPath);
+      if (await saveFile.exists()) {
+        // Dosya zaten varsa yeniden adlandır
+        final fileExt = path.extension(modelName);
+        final fileName = path.basenameWithoutExtension(modelName);
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final newName = '${fileName}_$timestamp$fileExt';
+        final newPath = path.join(saveDir, newName);
 
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Model başarıyla kaydedildi')),
-        );
+        // Dosyayı kopyala
+        await File(widget.modelPath).copy(newPath);
+
+        if (mounted) {
+          _showSuccess('Model farklı bir isimle kaydedildi: $newName');
+        }
+      } else {
+        // Dosyayı kopyala
+        await File(widget.modelPath).copy(savedPath);
+
+        if (mounted) {
+          _showSuccess('Model başarıyla kaydedildi: $modelName');
+        }
       }
+
+      logger.info('Model kaydedildi: $savedPath', tag: 'ModelViewer');
     } catch (e) {
+      logger.error('Model kaydetme hatası', exception: e, tag: 'ModelViewer');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Kaydetme hatası: $e')),
-        );
+        _showError('Kaydetme sırasında bir hata oluştu: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isProcessing = false;
+        });
       }
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 5),
+      ),
+    );
+  }
+
+  void _showSuccess(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   @override
@@ -82,41 +176,61 @@ class _ModelViewerScreenState extends State<ModelViewerScreen> {
       appBar: AppBar(
         title: const Text('3D Model Görüntüleyici'),
         actions: [
-          IconButton(
-            icon: const Icon(Icons.share),
-            onPressed: _shareModel,
-          ),
-          IconButton(
-            icon: const Icon(Icons.save),
-            onPressed: _saveModel,
-          ),
+          if (!_isLoading && !_isProcessing) ...[
+            IconButton(
+              icon: const Icon(Icons.share),
+              onPressed: _shareModel,
+              tooltip: 'Modeli Paylaş',
+            ),
+            IconButton(
+              icon: const Icon(Icons.save),
+              onPressed: _saveModel,
+              tooltip: 'Modeli Kaydet',
+            ),
+          ],
         ],
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
+          : Stack(
               children: [
-                Expanded(
-                  child: ModelViewer(
-                    backgroundColor: const Color.fromARGB(255, 230, 230, 230),
-                    src: 'file://${widget.modelPath}',
-                    alt: '3D Model',
-                    ar: true,
-                    arModes: const ['scene-viewer', 'webxr', 'quick-look'],
-                    autoRotate: true,
-                    cameraControls: true,
-                  ),
+                Column(
+                  children: [
+                    Expanded(
+                      child: ModelViewer(
+                        backgroundColor:
+                            const Color.fromARGB(255, 230, 230, 230),
+                        src: 'file://${widget.modelPath}',
+                        alt: '3D Model',
+                        ar: true,
+                        arModes: const ['scene-viewer', 'webxr', 'quick-look'],
+                        autoRotate: true,
+                        cameraControls: true,
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(16.0),
+                      child: Text(
+                        'Model: $modelName',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Text(
-                    'Model: $modelName',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.bold,
+
+                // İşlem göstergesi
+                if (_isProcessing)
+                  Container(
+                    color: Colors.black54,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
                     ),
                   ),
-                ),
               ],
             ),
     );

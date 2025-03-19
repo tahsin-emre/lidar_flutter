@@ -1,10 +1,10 @@
 import 'dart:io';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:flutter/foundation.dart' show kDebugMode;
 import '../state/scan_state.dart';
-import '../widgets/scan_progress_indicator.dart';
+import '../services/logger_service.dart';
 import 'model_viewer_screen.dart';
 import 'package:arkit_plugin/arkit_plugin.dart';
 
@@ -23,21 +23,28 @@ class _ScannerScreenState extends State<ScannerScreen>
   final MethodChannel scanServiceChannel =
       const MethodChannel('lidar_flutter/scan_service');
 
-  // Logger tanımı
-  final _devLog = kDebugMode ? print : (String message) {};
-
   bool _isPaused = false;
   bool _isProcessing = false;
   bool _showCompleteScanButton = false;
   dynamic _arController; // can be ARKitController on iOS
+  StreamSubscription? _scanEventSubscription;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initARScanner();
+
+    // AR tarayıcıyı asenkron olarak başlat
+    _initARScanner().catchError((error) {
+      logger.error('AR tarayıcı başlatma hatası', exception: error);
+      _showError('AR tarayıcı başlatılamadı', error.toString());
+    });
+
+    // Event dinleyiciyi bir sonraki frame'de başlat
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _listenToScanEvents();
+      if (mounted) {
+        _listenToScanEvents();
+      }
     });
   }
 
@@ -46,6 +53,7 @@ class _ScannerScreenState extends State<ScannerScreen>
     WidgetsBinding.instance.removeObserver(this);
     _pauseScan(); // Taramayı durdur
     _disposeAR();
+    _scanEventSubscription?.cancel(); // Stream aboneliğini iptal et
     super.dispose();
   }
 
@@ -59,11 +67,15 @@ class _ScannerScreenState extends State<ScannerScreen>
   }
 
   void _disposeAR() {
-    if (_arController != null) {
-      if (Platform.isIOS) {
-        (_arController as ARKitController).dispose();
+    try {
+      if (_arController != null) {
+        if (Platform.isIOS) {
+          (_arController as ARKitController).dispose();
+        }
+        _arController = null;
       }
-      _arController = null;
+    } catch (e) {
+      logger.error('AR Controller dispose hatası', exception: e);
     }
   }
 
@@ -80,7 +92,7 @@ class _ScannerScreenState extends State<ScannerScreen>
           ) ??
           false;
 
-      _devLog('ARKit yapılandırması: $result');
+      logger.info('ARKit yapılandırması: $result', tag: 'ScannerScreen');
 
       if (result) {
         // Tarama başlatma
@@ -89,44 +101,50 @@ class _ScannerScreenState extends State<ScannerScreen>
                 false;
 
         if (scanResult) {
-          _devLog('Tarama başlatıldı');
+          logger.info('Tarama başlatıldı', tag: 'ScannerScreen');
           // AR oturumunu başlat
           await methodChannel.invokeMethod<bool>('startScanning');
+        } else {
+          throw Exception('Tarama başlatılamadı');
         }
+      } else {
+        throw Exception('ARKit yapılandırması başarısız');
       }
     } catch (e) {
-      _devLog('ARKit başlatma hatası: $e');
-      // Hata durumunda kullanıcıya bilgi ver
+      logger.error('ARKit başlatma hatası', exception: e);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('AR tarayıcı başlatılamadı: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+        _showError('AR tarayıcı başlatılamadı', e.toString());
       }
+      rethrow; // Tekrar fırlat ki üst katmanda yakalanabilsin
     }
   }
 
   // Taramayı duraklatıp devam ettir
   void _togglePause() {
+    if (_isProcessing)
+      return; // İşlem sırasında duraklat/devam et tuşunu devre dışı bırak
+
     if (_isPaused) {
       _resumeScan();
     } else {
       _pauseScan();
     }
-    setState(() {
-      _isPaused = !_isPaused;
-    });
+
+    // setState çağrılarını minimize etmek için tek bir güncelleme yapıyoruz
+    if (mounted) {
+      setState(() {
+        _isPaused = !_isPaused;
+      });
+    }
   }
 
   // Taramayı duraklat
   Future<void> _pauseScan() async {
     try {
       await methodChannel.invokeMethod<void>('pauseScan');
+      logger.debug('Tarama duraklatıldı', tag: 'ScannerScreen');
     } catch (e) {
-      _devLog('Error pausing scan: $e');
+      logger.error('Tarama duraklatma hatası', exception: e);
     }
   }
 
@@ -134,114 +152,172 @@ class _ScannerScreenState extends State<ScannerScreen>
   Future<void> _resumeScan() async {
     try {
       await methodChannel.invokeMethod<void>('resumeScan');
+      logger.debug('Tarama devam ettirildi', tag: 'ScannerScreen');
     } catch (e) {
-      _devLog('Error resuming scan: $e');
+      logger.error('Tarama devam ettirme hatası', exception: e);
     }
   }
 
   // Taramayı sıfırla
   Future<void> _resetScan() async {
+    if (_isProcessing)
+      return; // İşlem sırasında sıfırlama tuşunu devre dışı bırak
+
     try {
       await methodChannel.invokeMethod<void>('resetScan');
-      setState(() {
-        _isPaused = false;
-        _showCompleteScanButton = false;
-      });
+
+      final scanState = Provider.of<ScanState>(context, listen: false);
+      scanState.reset();
+
+      if (mounted) {
+        setState(() {
+          _isPaused = false;
+          _showCompleteScanButton = false;
+        });
+      }
+
+      logger.info('Tarama sıfırlandı', tag: 'ScannerScreen');
     } catch (e) {
-      _devLog('Error resetting scan: $e');
+      logger.error('Tarama sıfırlama hatası', exception: e);
+      _showError('Sıfırlama hatası', e.toString());
     }
   }
 
-  // Tarama olaylarını dinle
+  // Tarama olaylarını dinle - state güncellemeleri ve performans optimizasyonu
   void _listenToScanEvents() {
-    scanEventChannel.receiveBroadcastStream().listen((dynamic event) {
-      if (event is! Map) {
-        return;
-      }
-      if (!mounted) {
-        return; // Eğer widget artık build ağacında değilse, işlemleri atlayalım
-      }
+    _scanEventSubscription = scanEventChannel.receiveBroadcastStream().listen(
+      (dynamic event) {
+        if (event is! Map || !mounted) {
+          return;
+        }
 
-      final scanState = Provider.of<ScanState>(context, listen: false);
-      final eventType = event['type'] as String?;
+        final eventType = event['type'] as String?;
 
-      switch (eventType) {
-        case 'scanProgress':
-          final progress = event['progress'] as double? ?? 0.0;
-          final completedSegments = event['completedSegments'] as int? ?? 0;
-          final totalSegments = event['totalSegments'] as int? ?? 0;
+        // UI güncellemelerini tek bir setState içinde yapmaya çalışıyoruz
+        // Ancak bazı durumlarda birden fazla setState çağrısı gerekebilir
 
-          if (mounted) {
-            setState(() {
-              scanState.updateProgress(progress);
-
-              // 360 derece tamamlanma durumunu güncelle
-              if (totalSegments > 0) {
-                scanState.updateScanCoverage(completedSegments, totalSegments);
-              }
-            });
-          }
-          break;
-
-        case 'guidance':
-          final message = event['message'] as String? ?? '';
-          if (mounted) {
-            setState(() {
-              scanState.updateGuidanceMessage(message);
-            });
-          }
-          break;
-
-        case 'scanStatus':
-          final status = event['status'] as String? ?? '';
-
-          if (status == 'completed') {
-            // Otomatik tarama tamamlandı, 3D modeli oluştur
-            _processAndExportModel();
-          } else if (status == 'failed') {
-            final message = event['message'] as String? ?? 'Bilinmeyen hata';
-            if (mounted) {
-              setState(() {
-                scanState.updateGuidanceMessage('Tarama hatası: $message');
-              });
-            }
-          } else if (status == 'readyToComplete') {
-            // Tam 360 derece tarama tamamlandıysa
-            if (scanState.isFullyCovered) {
-              _processAndExportModel();
-            } else {
-              if (mounted) {
-                setState(() {
-                  scanState.updateGuidanceMessage(
-                      'Tarama hazır! Tamamlamak için butona basın.');
-                  _showCompleteScanButton = true;
-                });
-              }
-            }
-          }
-          break;
-
-        case 'error':
-          final message = event['message'] as String? ?? 'Bilinmeyen hata';
-          if (mounted) {
-            setState(() {
-              scanState.updateGuidanceMessage('Hata: $message');
-            });
-          }
-          break;
-      }
-    }, onError: (error) {
-      _devLog('Event channel error: $error');
-    });
+        _handleScanEvent(eventType, event);
+      },
+      onError: (error) {
+        logger.error('Event channel hatası', exception: error);
+      },
+      onDone: () {
+        logger.info('Scan event stream kapandı', tag: 'ScannerScreen');
+      },
+    );
   }
 
-  // 3D modeli işle ve view ekranına git
+  // Tarama olaylarını handle et - daha modüler kod yapısı için
+  void _handleScanEvent(String? eventType, Map event) {
+    if (!mounted) return;
+
+    final scanState = Provider.of<ScanState>(context, listen: false);
+
+    switch (eventType) {
+      case 'scanProgress':
+        _handleScanProgressEvent(scanState, event);
+        break;
+
+      case 'guidance':
+        _handleGuidanceEvent(scanState, event);
+        break;
+
+      case 'scanStatus':
+        _handleScanStatusEvent(scanState, event);
+        break;
+
+      case 'error':
+        _handleErrorEvent(scanState, event);
+        break;
+    }
+  }
+
+  // Tarama ilerleme olayını handle et
+  void _handleScanProgressEvent(ScanState scanState, Map event) {
+    final progress = event['progress'] as double? ?? 0.0;
+    final completedSegments = event['completedSegments'] as int? ?? 0;
+    final totalSegments = event['totalSegments'] as int? ?? 0;
+
+    // UI güncellemesi
+    if (mounted) {
+      setState(() {
+        scanState.updateProgress(progress);
+        if (totalSegments > 0) {
+          scanState.updateScanCoverage(completedSegments, totalSegments);
+        }
+      });
+    }
+  }
+
+  // Rehberlik olayını handle et
+  void _handleGuidanceEvent(ScanState scanState, Map event) {
+    final message = event['message'] as String? ?? '';
+
+    if (mounted) {
+      setState(() {
+        scanState.updateGuidanceMessage(message);
+      });
+    }
+  }
+
+  // Tarama durumu olayını handle et
+  void _handleScanStatusEvent(ScanState scanState, Map event) {
+    final status = event['status'] as String? ?? '';
+
+    switch (status) {
+      case 'completed':
+        _processAndExportModel();
+        break;
+
+      case 'failed':
+        final message = event['message'] as String? ?? 'Bilinmeyen hata';
+        if (mounted) {
+          setState(() {
+            scanState.updateGuidanceMessage('Tarama hatası: $message');
+          });
+        }
+        break;
+
+      case 'readyToComplete':
+        if (scanState.isFullyCovered) {
+          _processAndExportModel();
+        } else if (mounted) {
+          setState(() {
+            scanState.updateGuidanceMessage(
+                'Tarama hazır! Tamamlamak için butona basın.');
+            _showCompleteScanButton = true;
+          });
+        }
+        break;
+    }
+  }
+
+  // Hata olayını handle et
+  void _handleErrorEvent(ScanState scanState, Map event) {
+    final message = event['message'] as String? ?? 'Bilinmeyen hata';
+
+    logger.error('Tarama hatası: $message', tag: 'ScannerScreen');
+
+    if (mounted) {
+      setState(() {
+        scanState.updateGuidanceMessage('Hata: $message');
+      });
+    }
+  }
+
+  // 3D modeli işle ve view ekranına git - optimize edilmiş
   Future<void> _processAndExportModel() async {
-    setState(() {
-      _isProcessing = true;
-    });
+    if (_isProcessing) return; // Zaten işlem yapılıyorsa tekrar başlatma
+
+    if (mounted) {
+      setState(() {
+        _isProcessing = true;
+      });
+    }
 
     try {
+      logger.info('Model işleniyor...', tag: 'ScannerScreen');
+
       final result =
           await scanServiceChannel.invokeMethod<Map<dynamic, dynamic>>(
         'processAndExportModel',
@@ -249,10 +325,14 @@ class _ScannerScreenState extends State<ScannerScreen>
 
       if (result != null && result.containsKey('modelPath')) {
         final modelPath = result['modelPath'] as String;
-        _devLog('3D model oluşturuldu: $modelPath');
+        logger.info('3D model oluşturuldu: $modelPath', tag: 'ScannerScreen');
 
         // İşlem tamamlandı, model görüntüleme ekranına git
         if (mounted) {
+          // ScanState'i güncelle
+          final scanState = Provider.of<ScanState>(context, listen: false);
+          scanState.completeScan(modelPath);
+
           setState(() {
             _isProcessing = false;
           });
@@ -267,15 +347,37 @@ class _ScannerScreenState extends State<ScannerScreen>
         throw Exception('3D model oluşturulamadı');
       }
     } catch (e) {
-      _devLog('Model işleme hatası: $e');
+      logger.error('Model işleme hatası', exception: e);
       if (mounted) {
+        // Hata durumunda ScanState'i güncelle
+        final scanState = Provider.of<ScanState>(context, listen: false);
+        scanState.failScan('Model işlenirken bir hata oluştu: $e');
+
         setState(() {
           _isProcessing = false;
         });
 
-        _showErrorDialog(
+        _showError(
             'Model oluşturma hatası', 'Model işlenirken bir hata oluştu: $e');
       }
+    }
+  }
+
+  // Hata göster - tekrar kullanılabilir yardımcı metod
+  void _showError(String title, String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('$title: $message'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Detaylar',
+            onPressed: () => _showErrorDialog(title, message),
+            textColor: Colors.white,
+          ),
+        ),
+      );
     }
   }
 
@@ -318,7 +420,8 @@ class _ScannerScreenState extends State<ScannerScreen>
                 ? UiKitView(
                     viewType: 'lidar_flutter/ar_view',
                     onPlatformViewCreated: (int id) {
-                      _devLog('ARKit view oluşturuldu: $id');
+                      logger.info('ARKit view oluşturuldu: $id',
+                          tag: 'ScannerScreen');
                     },
                     creationParams: <String, dynamic>{
                       'enableLiDAR': true,

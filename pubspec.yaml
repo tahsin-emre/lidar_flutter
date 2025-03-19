@@ -52,6 +52,9 @@ dependencies:
   # Platform channel communication
   flutter_isolate: ^2.0.4    # Handle heavy tasks in background
   
+  # Sharing
+  share_plus: ^7.2.1         # For sharing 3D models
+  
   # UI components
   flutter_svg: ^2.0.9        # SVG support for UI elements
   lottie: ^3.0.0             # Animation for scanning instructions
