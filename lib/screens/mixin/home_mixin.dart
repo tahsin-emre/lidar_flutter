@@ -59,6 +59,7 @@ mixin HomeMixin on State<HomeScreen> {
       );
       return;
     }
+
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const ScannerScreen()),

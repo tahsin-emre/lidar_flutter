@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:lidar_flutter/screens/mixin/home_mixin.dart';
-import 'package:lidar_flutter/screens/viewer_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -77,25 +76,25 @@ class _HomeScreenState extends State<HomeScreen> with HomeMixin {
                     ),
                   ),
                   const SizedBox(height: 16),
-                  OutlinedButton(
-                    onPressed: () => Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (context) => const ViewerScreen(),
-                      ),
-                    ),
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                    ),
-                    child: const Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.view_in_ar),
-                        SizedBox(width: 8),
-                        Text('View Saved Models'),
-                      ],
-                    ),
-                  ),
+                  // OutlinedButton(
+                  //   onPressed: () => Navigator.push(
+                  //     context,
+                  //     MaterialPageRoute(
+                  //       builder: (context) => const ViewerScreen(),
+                  //     ),
+                  //   ),
+                  //   style: OutlinedButton.styleFrom(
+                  //     padding: const EdgeInsets.symmetric(vertical: 16),
+                  //   ),
+                  //   child: const Row(
+                  //     mainAxisAlignment: MainAxisAlignment.center,
+                  //     children: [
+                  //       Icon(Icons.view_in_ar),
+                  //       SizedBox(width: 8),
+                  //       Text('View Saved Models'),
+                  //     ],
+                  //   ),
+                  // ),
                 ],
               ),
             ),
